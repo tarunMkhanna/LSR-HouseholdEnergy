@@ -1,0 +1,2279 @@
+---
+title: "behavioural-interventions-ma-nma"
+author: "diana danilenko"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r 0. setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r 1. load libraries}
+library(metafor) 
+library(meta)
+library(metadat)
+library(dplyr)
+library(ggplot2)
+library(texreg)
+library(tidyverse) 
+library(summarytools) 
+library(rmarkdown)
+library(devtools)
+library(clubSandwich)
+library(cowplot)
+library(ggrepel) 
+library(igraph)
+library(nmarank)
+library(knitr)
+library(kableExtra)
+library(gemtc)
+library(rjags)
+library(gridExtra)
+library(modelsummary)
+library(readr)
+library(boot)
+library(haven)
+library(stringr)
+library(shiny)
+library(readxl)
+```
+
+```{r 2. set working directory and load functions}
+setwd("your working directory")
+source("functions_v1.R")
+source("functions_nma.R")
+```
+
+```{r 3. load and pre-process data}
+# SPECIFY INPUT FILE HERE
+dfinc <- readxl::read_xlsx("codingsheet.xlsx")
+# dfinc <- dfinc %>% filter(! is.na(dfinc$coder))
+
+table(dfinc$ExclusionReasonLSR)
+
+dfinc <- dfinc %>% 
+  filter(dfinc$ExclusionReasonLSR == "NA" | is.na(dfinc$ExclusionReasonLSR))
+
+uniqueIDs <- unique(dfinc$documentID)
+# dfinc_study <- dfinc %>% distinct(Authors, `document PY`, `document title`, .keep_all = TRUE)
+# rm(dfinc_study)
+
+dfinc$effect_direction <- ifelse(dfinc$effect_direction == "decrease", -1, 
+                                  ifelse(dfinc$effect_direction == "increase", 1, NA))
+
+dfinc <- dfinc %>% 
+  mutate(across(c(PercentageChange,coefficient, coefficient_sd, control_mean, control_sample_size, control_sd, treated_mean, treatment_sample_size, treated_sd, total_sample_size, diff_mean, pooled_sd, p_value, test_statistic), as.numeric))
+
+dfinc$PercentageChange <- abs(as.numeric(dfinc$PercentageChange))
+dfinc$test_statistic <- abs(as.numeric(dfinc$test_statistic))
+```
+
+```{r 4. check RoB variables}
+sum(table(dfinc$DataCausal))
+sum(table(dfinc$ConfounderPossibility)) 
+sum(table(dfinc$ConfounderAll))
+sum(table(dfinc$ConfounderJustifiedOmission))
+sum(table(dfinc$ConfounderAccuracy))
+sum(table(dfinc$ConfounderAnalysis ))
+sum(table(dfinc$SampleExchangeability ))
+sum(table(dfinc$SampleExclusion))
+sum(table(dfinc$SampleGroupComparability))
+sum(table(dfinc$SampleGroupDifferenceIntervention))
+sum(table(dfinc$SampleBiasAdjustment))
+sum(table(dfinc$AwareofStudy))
+sum(table(dfinc$DataSelective))
+sum(table(dfinc$DataSubgroups))
+sum(table(dfinc$DataCausal))
+sum(table(dfinc$StatsRecording))
+sum(table(dfinc$StatsDescriptiveError))
+sum(table(dfinc$StatsInferentialError))
+sum(table(dfinc$StatsInferentialViolation))
+
+rob_variables <- c(
+  "DataCausal", "ConfounderPossibility", "ConfounderAll", "ConfounderJustifiedOmission",
+  "ConfounderAccuracy", "ConfounderAnalysis", "SampleExchangeability", "SampleExclusion",
+  "SampleGroupComparability", "SampleGroupDifferenceIntervention", "SampleBiasAdjustment",
+  "AwareofStudy", "DataSelective", "DataSubgroups", "DataCausal", "StatsRecording",
+  "StatsDescriptiveError", "StatsInferentialError", "StatsInferentialViolation"
+)
+
+# Apply the transformation to each variable
+for (var in rob_variables) {
+  # Mutate the variable based on "no" and "yes" text presence
+  dfinc[[var]] <- ifelse(grepl("\\bno\\b", dfinc[[var]], ignore.case = TRUE), "No",
+                       ifelse(grepl("\\byes\\b", dfinc[[var]], ignore.case = TRUE), "Yes", NA))
+}
+
+# Check the tables of original and mutated variables
+for (var in rob_variables) {
+  print(table(dfinc[[var]]))
+}
+```
+
+```{r 5. process RoB variables}
+# criterion 1: risk of confounding biases
+dfinc <- dfinc %>%
+  mutate(across(c(ConfounderPossibility, ConfounderAll, ConfounderJustifiedOmission, ConfounderAccuracy, ConfounderAnalysis), as.factor))
+
+dfinc['cat_criterion1'] <- NA
+dfinc$cat_criterion1 <- ifelse((dfinc$ConfounderPossibility == "No" | dfinc$ConfounderPossibility == "Seemingly no"), "low", 
+                                ifelse((dfinc$ConfounderAll == "No" | dfinc$ConfounderAll == "Seemingly no"),ifelse((dfinc$ConfounderJustifiedOmission == "No" | dfinc$ConfounderJustifiedOmission == "Seemingly no"),"high",ifelse((dfinc$ConfounderAnalysis == "No" | dfinc$ConfounderAnalysis == "Seemingly no"),"high","low")),
+                                       ifelse((dfinc$ConfounderAnalysis == "No" | dfinc$ConfounderAnalysis == "Seemingly no"),"medium","low")))
+
+table(dfinc$cat_criterion1)
+
+# criterion 2: risk of post-intervention/exposure selection biases
+dfinc <- dfinc %>%
+  mutate(across(c(SampleExchangeability, SampleExclusion, SampleGroupComparability, SampleGroupDifferenceIntervention, SampleBiasAdjustment), as.factor))
+
+dfinc['cat_criterion2'] <- NA
+
+dfinc$cat_criterion2 <- ifelse((dfinc$SampleExchangeability == "No" | dfinc$SampleExchangeability == "Seemingly no"),
+                                ifelse((dfinc$SampleGroupComparability == "No" | dfinc$SampleGroupComparability == "Seemingly no"),
+                                       ifelse((dfinc$SampleGroupDifferenceIntervention == "No" | dfinc$SampleGroupDifferenceIntervention == "Seemingly no"),"medium",
+                                              ifelse((dfinc$SampleBiasAdjustment == "No" | dfinc$SampleBiasAdjustment == "Seemingly no"),"high","medium")),"medium"),
+                                ifelse((dfinc$SampleExclusion == "No" | dfinc$SampleExclusion == "Seemingly no"),"low",ifelse((dfinc$SampleGroupComparability == "No" | dfinc$SampleGroupComparability == "Seemingly no"),
+                                                                                                                                ifelse((dfinc$SampleGroupDifferenceIntervention == "No" | dfinc$SampleGroupDifferenceIntervention == "Seemingly no"),"medium",
+                                                                                                                                       ifelse((dfinc$SampleBiasAdjustment == "No" | dfinc$SampleBiasAdjustment == "Seemingly no"),"high","medium")),"medium")))
+
+table(dfinc$cat_criterion2)
+
+# criterion 5: risk of detection biases
+dfinc <- dfinc %>%
+  mutate(across(c(AwareofStudy), as.factor))
+
+dfinc['cat_criterion5'] <- NA
+
+dfinc$cat_criterion5 <- ifelse((dfinc$AwareofStudy == "No" | dfinc$AwareofStudy == "Seemingly no"),"low","high")
+
+table(dfinc$cat_criterion5)
+
+# criterion 6: risk of outcome reporting biases
+dfinc <- dfinc %>%
+  mutate(across(c(DataSelective, DataSubgroups, DataCausal), as.factor))
+
+dfinc['cat_criterion6'] <- NA
+
+dfinc$cat_criterion6 <- ifelse((dfinc$DataSelective == "No" | dfinc$DataSelective == "Seemingly no"), 
+                                ifelse((dfinc$DataSubgroups == "No" | dfinc$DataSubgroups == "Seemingly no"), 
+                                ifelse((dfinc$DataCausal == "No" | dfinc$DataCausal == "Seemingly no"),"low","medium"),
+                                ifelse((dfinc$DataCausal == "No" | dfinc$DataCausal == "Seemingly no"),"medium","high")),
+                                ifelse((dfinc$DataSubgroups == "No" | dfinc$DataSubgroups == "Seemingly no"),
+                                       ifelse((dfinc$DataCausal == "No" | dfinc$DataCausal == "Seemingly no"),"medium","high"),"high"))
+
+table(dfinc$cat_criterion6)
+
+# criterion 7: risk of outcome assessment biases
+dfinc <- dfinc %>%
+  mutate(across(c(StatsRecording, StatsDescriptiveError, StatsInferentialError, StatsInferentialViolation), as.factor))
+
+dfinc['cat_criterion7'] <- NA
+
+dfinc$cat_criterion7 <- ifelse((dfinc$StatsRecording == "No" | dfinc$StatsRecording == "Seemingly no"),
+                                ifelse((dfinc$StatsDescriptiveError == "No" | dfinc$StatsDescriptiveError == "Seemingly no"),
+                                       ifelse((dfinc$StatsInferentialError == "No" | dfinc$StatsInferentialError == "Seemingly no"),"low","high"),
+                                       "high"),
+                                ifelse((dfinc$StatsDescriptiveError == "No" | dfinc$StatsDescriptiveError == "Seemingly no"),"medium","high"))
+
+table(dfinc$cat_criterion7)
+```
+
+```{r 6. (opt.) summarise risk of bias values in 1 variable}
+dfinc <- mutate(dfinc,
+                cat_criterion1 = case_when(cat_criterion1 == "low" ~ 1,
+                                           cat_criterion1 == "medium" ~ 2,
+                                           cat_criterion1 == "high" ~3),
+                cat_criterion2 = case_when(cat_criterion2 == "low" ~ 1,
+                                           cat_criterion2 == "medium" ~ 2,
+                                           cat_criterion2 == "high" ~3),
+                cat_criterion5 = case_when(cat_criterion5 == "low" ~ 1,
+                                           cat_criterion5 == "medium" ~ 2,
+                                           cat_criterion5 == "high" ~3),
+                cat_criterion6 = case_when(cat_criterion6 == "low" ~ 1,
+                                           cat_criterion6 == "medium" ~ 2,
+                                           cat_criterion6 == "high" ~3),
+                cat_criterion7 = case_when(cat_criterion7 == "low" ~ 1,
+                                           cat_criterion7 == "medium" ~ 2,
+                                           cat_criterion7 == "high" ~3),
+                
+                cat_criteria_sum = cat_criterion1+cat_criterion2+cat_criterion5+cat_criterion6+cat_criterion7)
+
+dfinc <- mutate(dfinc,
+                cat_criteria_sum = case_when(cat_criteria_sum <= 5 ~"low",
+                                           ((cat_criteria_sum > 5) & (cat_criteria_sum <= 10)) ~ "medium",
+                                           cat_criteria_sum >10 ~ "high"))
+
+table(dfinc$cat_criteria_sum)
+```
+
+```{r 7. (opt.) exclude outliers or any other categories of observations}
+# when running the analysis for the first time, skip this and come back after chunk #17 on 'identify outliers using cook's d'
+# exclude outliers as identified based on cook's d and by looking at them (we exclude CPP and PLP later, which excludes 1 outlier)
+
+# exclude Meub et al. 2019 "23-182"
+dfinc <- dfinc %>% filter(! documentID == "23-182")
+# exclude Staats et al. 2004 "23-305"
+dfinc <- dfinc %>% filter(! documentID == "23-305")
+
+dfinc$`Critical Peak Pricing` <- as.numeric(dfinc$`Critical Peak Pricing`)
+dfinc$`Peak Load Pricing` <- as.numeric(dfinc$`Peak Load Pricing`)
+
+dfinc <- dfinc %>% filter(dfinc$`Critical Peak Pricing` == 0 | is.na(dfinc$'Critical Peak Pricing')) 
+dfinc <- dfinc %>% filter(dfinc$`Peak Load Pricing` == 0 | is.na(dfinc$'Peak Load Pricing'))
+```
+
+```{r 8. calculate smd and smd var}
+# CALCULATING STANDARDIZED SIZES AND VARIANCES
+
+# if t-stat is NA, estimate it from p-value, and total sample size
+
+# formulas taken from Ringquist
+# compute effect measures (r_coefficient, smd, fisher's z)
+dfinc <- mutate(dfinc,
+                # calculating r coefficient for regression results using sample_size  
+                # readjust the calculation as required based on the type of significance test
+                # currently we assume NAs, not specified and all other types as t-test 
+                r_coefficient = ifelse((significance_test == "t-test"), ((`test_statistic`)^2/((`test_statistic`)^2 + `total_sample_size`))^(1/2) * effect_direction * -1 , # result is adjusted for the effect direction and inverted.
+                                       ifelse((significance_test == "z-test" | significance_test == "X^2 Test"), (`test_statistic`^2/`total_sample_size`)^(1/2)* effect_direction * -1 , NA)), 
+
+
+                # calculating smd for experiments with difference of means results
+                pooled_sd = ifelse(is.na(pooled_sd) & study_design == "Pre-test/post-test", (((`treatment_sample_size`-1)*control_sd^2 + (`treatment_sample_size`-1)*treated_sd^2)/(`treatment_sample_size` + `treatment_sample_size` - 2))^(1/2),
+                                   ifelse(is.na(pooled_sd) & study_design != "Pre-test/post-test", (((`control_sample_size`-1)*control_sd^2 + (`treatment_sample_size`-1)*treated_sd^2)/(`control_sample_size` + `treatment_sample_size` - 2))^(1/2),
+                                          pooled_sd)),
+            
+                # calculate standardized mean differences
+                smd1= ifelse(`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA" , `diff_mean`/`pooled_sd`, NA),
+    
+                smd2= ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "F-test" | significance_test == "H-test") & study_design == "Control-treatment"),
+                             (`test_statistic`/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                             ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "F-test" | significance_test == "H-test") & study_design == "Difference in Difference"),
+                                    (`test_statistic`/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                                    ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "F-test" | significance_test == "H-test") & study_design == "Pre-test/post-test"),
+                                           (`test_statistic`/(`treatment_sample_size`)^2*(2*`treatment_sample_size`))^(1/2),   #using treatment sample = control sample
+                                           
+                                           ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "t-test" | significance_test == "z-test") & study_design == "Control-treatment"),
+                                                  `test_statistic` * (1/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                                                  ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "t-test" | significance_test == "z-test") & study_design == "Difference in Difference"),
+                                                         `test_statistic` * (1/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                                                         ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "t-test" | significance_test == "z-test") & study_design == "Pre-test/post-test"),
+                                                                `test_statistic` * (1/(`treatment_sample_size`)^2*(2*`treatment_sample_size`))^(1/2), #using treatment sample = control sample
+                                                                
+                                                                NA)))))),
+                
+                smd = smd1,
+                smd = ifelse(is.na(smd1), smd2, smd1),
+                
+                # converting d into r for difference of means regressions and ANOVA
+                r_coefficient = ifelse(`statistical_technique`  %in% c("Difference of means", "ANOVA"), smd/(smd^2+4)^(1/2), r_coefficient),
+                
+                # converting r into smd
+                smd = ifelse(
+                  is.na(smd1),
+                  2*r_coefficient/(1-r_coefficient^2)^0.5,
+                    smd1
+                  ),
+                
+                zi = 0.5 * log((1+r_coefficient) / (1-r_coefficient))
+)
+
+
+# Compute variance of effect measures
+dfinc <- mutate(dfinc,
+                # variance of r
+                var_r1 = (1-r_coefficient^2)^2/(`total_sample_size` - 1), 
+                var_r2 = coefficient_sd^2, 
+                var_r = var_r1,
+                var_r = ifelse(is.na(var_r1), var_r2, var_r1),
+ 
+                # variance of smd
+                var_smd = ifelse(control_sample_size>0, ((`control_sample_size`+`treatment_sample_size`)/(`control_sample_size`*`treatment_sample_size`)) + (smd^2/(2*(`control_sample_size`+`treatment_sample_size`))),
+                                 ((`treatment_sample_size`+`treatment_sample_size`)/(`treatment_sample_size`*`treatment_sample_size`)) + (smd^2/(2*(`treatment_sample_size`+`treatment_sample_size`)))),
+           
+                # coverting var_smd to var_r
+                var_r = ifelse(is.na(var_r),
+                               (4^2*var_smd)/((smd^2+4)^3),
+                               var_r),
+            
+                #converting var_r to var_smd
+                var_smd = ifelse(is.na(var_smd),
+                                 4*var_r/(1-r_coefficient^2)^3,
+                                 var_smd),
+           
+                # #variance of Zs
+                vi   = 1/(`total_sample_size` - 3)
+)
+
+# filter only observations with complete smd & var[smd]
+dfinc <- dfinc %>%
+  filter(!is.na(smd) & !is.na(var_smd))
+print(paste0(nrow(dfinc), " data can be used after all"))
+
+# 287 new data points (after removing outlier Meub and CPP, PLP)
+# 344 old data points (after removing outlier Staats et al. and CPP, PLP)
+# 631 data points
+
+summary(dfinc$smd)
+
+# new smd min -12.2 max 3.23
+# old smd min - 1.04 max 3.07
+
+# dfinc_out <- dfinc %>% filter(abs(dfinc$smd) > 3.5)
+# one of them has a sample size of 6 / total 12 (excluded also, Caballero et al.)
+
+# dfinc <- dfinc %>% filter( ! abs(dfinc$smd) > 3.5)
+# 270 new observations
+# 631 total obs
+
+# dfinc<- dfinc %>% filter( ! abs(dfinc$smd) > 1)
+# 603 obs
+```
+
+```{r 9. clean data and introduce controls}
+# DATA CLEANING AND CONTROLS
+dfinc$study_design <- as.factor(dfinc$study_design)
+
+table(dfinc$'randomisation_dummy')
+
+dfinc <- dfinc %>%
+  mutate(
+    randomisation_level = case_when(
+      `Randomisation method` %in% c("no", "No", "none", "not done", "Not randoized", "not randomized", "Not randomized") ~ "not randomised",
+      `Randomisation method` %in% c("Household", "household level", "Household level", "Household level randomization", 
+                                    "Household stratified randomization", "Individual Household", "individual Household - RCT", 
+                                    "Individual Household - RCT", "Individual Household -RCT", "Stratified random sampling at household level", 
+                                    "Room level randomization") ~ "household",
+      `Randomisation method` %in% c("Floor level randomisation", "geographically-contiguous “block batch”", 
+                                    "Grouped Household", "Grouped Household - Contiguous block group", 
+                                    "Grouped Household - randomized block design", "Grouped Household - RCT") ~ "group"
+    )
+  ) %>%
+  mutate(
+    randomisation_level = case_when(
+      is.na(randomisation_level) & randomisation_dummy %in% c("no", "No") ~ "not randomised",
+      is.na(randomisation_level) & randomisation_dummy %in% c("yes", "Yes") ~ "randomised",
+      TRUE ~ randomisation_level
+    )
+  )
+
+dfinc <- mutate(dfinc, 
+                ElectricityUse = `controls Electricity use`,
+                ElectricityPrice = `controls Energy prices`,
+                EnvironmentAttitudes =  `controls Environmental attitudes`,
+                HouseholdType =  `controls HH controls (demographics)`,
+                ResidenceType = `controls Residence controls`,
+                Season =   `controls Seasonal controls`,
+                Weather = `controls Weather controls`,
+                
+                Region = case_when(
+                  country %in% c("India") ~ 'Asia',
+                  country %in% c("Japan") ~ 'Asia',
+                  country %in% c("South Korea") ~ 'Asia',
+                  country %in% c("Singapore") ~ 'Asia',
+                  country %in% c("China") ~ 'Asia',
+                  country %in% c("Bangladesh") ~ 'Asia',
+                  country %in% c("Taiwan") ~ 'Asia',
+                  country %in% c("Thailand") ~ 'Asia',
+                  country %in% c("Korea") ~ 'Asia',
+                  country %in% c("Israel") ~ 'Asia',
+                  country %in% c("Iran") ~ 'Asia',
+                  
+                  
+                  country %in% c("Austria") ~ 'Europe excl. UK',
+                  country %in% c("Denmark") ~ 'Europe excl. UK',
+                  country %in% c("Finland") ~ 'Europe excl. UK',
+                  country %in% c("France") ~ 'Europe excl. UK',
+                  country %in% c("Germany") ~ 'Europe excl. UK',
+                  country %in% c("Italy") ~ 'Europe excl. UK',
+                  country %in% c("Latvia") ~ 'Europe excl. UK',
+                  country %in% c("Netherlands") ~ 'Europe excl. UK',
+                  country %in% c("Northern") ~ 'Europe excl. UK',
+                  country %in% c("Poland") ~ 'Europe excl. UK',
+                  country %in% c("Sweden") ~ 'Europe excl. UK',
+                  country %in% c("Switzerland") ~ 'Europe excl. UK',
+                  country %in% c("Ireland") ~ 'Europe excl. UK',
+                  country %in% c("Portugal") ~ 'Europe excl. UK',
+                  country %in% c("Spain") ~ 'Europe excl. UK',
+                  country %in% c("Lithuania") ~ 'Europe excl. UK',
+                  country %in% c("Moldova") ~ 'Europe excl. UK',
+                  country %in% c("Monaco") ~ 'Europe excl. UK',
+                  country %in% c("Serbia") ~ 'Europe excl. UK',
+                  
+                  country %in% c("Colombia") ~ 'South America',
+                  country %in% c("Ecuador") ~ 'South America',
+                  country %in% c("Canada") ~ 'North America',
+                  country %in% c("Chile") ~ 'South America',
+                  country %in% c("Brasil") ~ 'South America',
+                  country %in% c("Argentina") ~ 'South America',
+                                    
+                  country %in% c("South Africa") ~ 'Africa',
+                  country %in% c("Mexico") ~ 'Central America',
+                  country %in% c("Australia") ~ 'Oceania',
+                  
+                  country %in% c("United Kingdom", "England","UK") ~ 'United Kingdom',
+                  country %in% c("United States","USA") ~ 'North America',
+                  
+                  TRUE ~ country),
+                
+                StatsMethod = case_when( statistical_technique %in% c("Difference of means", "ANOVA") ~ "MeansDifferences",
+                                         # statistical_technique %in% c("Household Fixed effects regression ", "Time & Household Fixed effects regression ", "Fixed effects regression ",
+                                         #                              "Random effects regression ") ~ "PanelEffects",
+                                         statistical_technique %in% c("OLS regression") ~ "OLS",
+                                         TRUE ~ "PanelEffects"),
+                
+                StudyDesign = case_when( study_design  %in% c("Control-treatment") ~ "Control-treatment",
+                                         study_design  %in% c("Difference in Difference") ~ "DID",
+                                         study_design  %in% c("Pre-test/ post-test", "Pre-test/post-test") ~ "PrePost"),
+                
+                # creates a binary Control variable indicating whether a control group is present based on the control_sample_size.
+                Control = if_else(control_sample_size>0, 1, 
+                                  if_else(is.na(control_sample_size), 0, 0),0),
+                
+                BaselineConsumption = `baselineConsumption`, 
+                InterventionDuration = interventionDuration,
+                
+                Randomisation = case_when(`Randomisation method`  %in% c("no", "No", "none", "None", "not done","Not randoized", "not randomized", "Not randomized", 
+                                                                         "Not randomized, lower socio economic status population") ~ "No",
+                                          # `Randomisation method`  %in% c(NA, "No details") ~ "NA",
+                                          TRUE ~ "Yes"),  
+                # Were households first selected and then allowed to opt out of the intervention or were the households required to opt-in to the intervention or neither
+    
+                
+                After2000 = case_when(`document PY` > 2000 ~ "After",
+                                      TRUE ~ "Before"),
+                
+                StudyYear = `document PY`,
+                
+                Followup = case_when(interventionFollowup>0 ~ 1,
+                                     interventionFollowup == NA ~ 0, 
+                                     TRUE ~ 0),
+                
+                Geographic_Scope = ifelse(geographic_scope %in% c("Country", "State", "City", "Municipality", "Smaller than municipality"), "Macro", "Minor")
+                
+)
+
+# sets and reorders the factor levels for StudyDesign, StatsMethod, and Region.
+dfinc$StudyDesign <- factor(dfinc$StudyDesign, levels = c("DID", "Control-treatment", "PrePost"))
+dfinc$StudyDesign <- relevel(dfinc$StudyDesign, ref =  "PrePost")
+
+dfinc$StatsMethod <- as.factor(dfinc$StatsMethod)
+dfinc$StatsMethod <- factor(dfinc$StatsMethod, levels = c("MeansDifferences", "OLS", "PanelEffects"))
+dfinc$StatsMethod <- relevel(dfinc$StatsMethod, ref = "OLS")
+
+dfinc$Region <- as.factor(dfinc$Region)
+dfinc$Region <- factor(dfinc$Region, levels = c("Asia", "United States", "United Kingdom","Europe excl. UK", "Others"))
+dfinc$Region <- relevel(dfinc$Region, ref = "United States")
+
+dfinc$InterventionID <- 1:nrow(dfinc)
+```
+
+```{r load dataset}
+load("lsr_data_2024.R")
+# save data in R database before outlier exlusion
+# save(dfinc,file="lsr_data_2024.R")
+# write.xlsx(dfinc,"lsr_data_2024.xlsx") figure out how to save this data without making it broken
+```
+
+```{r 10. process intervention variables}
+
+# ANALYSIS USING 6 MAIN CATEGORIES MAPPING - FEEDBACK, INFORMATION, SOCIAL, MOTIVATION, MONETARY, DYNAMICPRICING
+
+# Prepare data for analysis
+dfinc_all <- dfinc %>%
+  mutate(
+    Feedback = ifelse(`Historical` == 1  | `Home Energy Report` == 1 | `In home display` == 1 | `Smart Metering` == 1, 1, 0),
+    Information = ifelse(`Awareness Campaign` == 1 | `Bills` == 1 |`Home audits` == 1 | `tips` == 1, 1, 0),
+    SocialComparison = ifelse(`Injunctive Norm / Social Norm` == 1 | `peer comparison` == 1, 1, 0),
+    Motivation = ifelse(`Commitment strategies` == 1 | `Competition` == 1 | `Gamification` == 1 | `Goal Setting` == 1 | `Moral suasion` == 1, 1, 0),
+    DynamicPricing = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1,  1, 0),
+    MonetaryRewards = ifelse(`Rewards` == 1, 1, 0)
+  ) %>% 
+  replace_na(list(
+    Feedback = 0,
+    Information = 0,
+    SocialComparison = 0,
+    Motivation = 0,
+    MonetaryRewards = 0,
+    DynamicPricing = 0
+  )) %>%
+  mutate(Feedback_2 = ifelse(Feedback == 1, "Feedback1", "Feedback0")) %>% 
+  mutate(Information_2 = ifelse(Information == 1, "Information1", "Information0")) %>% 
+  mutate(SocialComparison_2 = ifelse(SocialComparison == 1, "SocialComparison1", "SocialComparison0")) %>% 
+  mutate(Motivation_2 = ifelse(Motivation == 1, "Motivation1", "Motivation0")) %>% 
+  mutate(MonetaryRewards_2 = ifelse(MonetaryRewards == 1, "MonetaryRewards1", "MonetaryRewards0")) %>%
+  mutate(DynamicPricing_2 = ifelse(DynamicPricing == 1, "DynamicPricing1", "DynamicPricing0")) %>%
+  mutate(Treatment1 = paste(Feedback_2, Information_2, SocialComparison_2, Motivation_2, MonetaryRewards_2, DynamicPricing_2, sep = ":")) %>%
+  filter(Treatment1 != "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0") %>% # Exclude effect size that doesn't get mapped to a valid intervention
+  mutate(treatment = mapping_vector[Treatment1])
+
+dfinc_all <- dfinc_all %>%
+  mutate(intervention = apply(select(., Feedback, Information, SocialComparison, Motivation, MonetaryRewards, DynamicPricing), 1, function(row) {
+    cols <- names(row)[which(row == 1)]   # get names of columns where the value is 1
+    if(length(cols) > 0) {
+      paste(cols, collapse = "_")         # concatenate with underscore
+    } else {
+      NA                                  # if no values are 1, set to NA
+    }
+  }))
+
+dfinc_all$InterventionID <- 1:nrow(dfinc_all)
+
+dfinc_all$Feedback <- factor(dfinc_all$Feedback)
+dfinc_all$Information <- factor(dfinc_all$Information)
+dfinc_all$SocialComparison <- factor(dfinc_all$SocialComparison)
+dfinc_all$Motivation <- factor(dfinc_all$Motivation)
+dfinc_all$MonetaryRewards <- factor(dfinc_all$MonetaryRewards)
+dfinc_all$DynamicPricing <- factor(dfinc_all$DynamicPricing)
+
+# use this for showing n observarions per intervention
+int_count <- table(dfinc_all$intervention)
+```
+
+```{r 11. (opt.) additional exclusion criteria}
+# decide the cutoff of sample size exclusion
+ggplot(dfinc_all, aes(x = total_sample_size)) +
+  geom_histogram(aes(y = ..count..), bins = 30, fill = "skyblue", color = "black") +
+  geom_text(stat = "count", aes(label = ..count.., y = ..count.. + 5), vjust = -1.5, color = "black", size = 3) +
+  geom_density(alpha = .2, fill = "#FF6666") +
+  labs(title = "Distribution of Total Sample Size",
+       x = "Total Sample Size",
+       y = "Frequency") +
+  theme_minimal()
+
+# intervention combination with >=5 observations 
+# execute if you want to exclude studies that has intervention types with < 5 observations
+
+treat_counts <- dfinc_all %>%
+  group_by(treatment) %>%
+  summarise(count = n(), .groups = 'drop')
+treats_to_remove <- treat_counts %>%
+  filter(count < 5) %>%
+  select(treatment, count)
+print(treats_to_remove)
+
+# paper with negative diff_mean
+negative_diff_mean_ids <- dfinc_all %>%
+  filter(diff_mean < 0) %>%
+  select(`document ID`, `document title`, `Authors`) %>%
+  distinct()
+print(negative_diff_mean_ids)
+
+# more data exclusion criteria
+dfinc_all <- dfinc_all %>%
+  filter(total_sample_size <= quantile(dfinc_all$total_sample_size, 0.97)) %>% 
+  # exclude studies with top 3% sample size
+  filter(!(treatment %in% treats_to_remove$treatment)) # %>%
+# exclude studies with intervention type that has < 5 observations
+# 565 observations
+  # filter(! dfinc_all$'document ID' %in% negative_diff_mean_ids['document ID])
+```
+
+```{r 12. meta-analysis}
+# MA (Comparing interventions in a meta regression model and interactions)
+
+# dfinc_all <- dfinc_all %>%
+#  filter (intervention %in% c("Feedback","Information","SocialComparison","Motivation","MonetaryRewards", "DynamicPricing"))
+
+EffectSizeSummary_RE <- data_frame() 
+
+#meta_model<-rma.mv(smd, var_smd, mods =  ~Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0, 
+ #                              random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = #"REML")
+
+EffectSizeSummary_RE <- rbind(EffectSizeSummary_RE,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_all, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
+                                             
+                                )
+                                )
+  )
+
+EffectSizeSummary_RE<- separate(EffectSizeSummary_RE, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+EffectSizeSummary_RE <- mutate(EffectSizeSummary_RE,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+EffectSizeSummary_RE <- mutate(EffectSizeSummary_RE,
+                               order = case_when(rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
+                                              
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing")
+                               
+)
+
+EffectSizeSummary_RE_f <- EffectSizeSummary_RE %>% 
+  filter (EffectSizeSummary_RE$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+summary(meta_model)
+```
+
+```{r 12(b). meta-analysis correcting for publication bias}
+# MA (Comparing interventions in a meta regression model and interactions)
+
+# dfinc_all <- dfinc_all %>%
+#  filter (intervention %in% c("Feedback","Information","SocialComparison","Motivation","MonetaryRewards", "DynamicPricing"))
+
+EffectSizeSummary_RE2 <- data_frame() 
+
+meta_model2 <-rma.mv(smd, var_smd, mods =  ~Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0+var_smd, 
+                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+summary(meta_model2)
+
+EffectSizeSummary_RE2 <- rbind(EffectSizeSummary_RE2,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_all, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0+var_smd
+                                             
+                                )
+                                )
+  )
+
+EffectSizeSummary_RE2 <- separate(EffectSizeSummary_RE2, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+EffectSizeSummary_RE2 <- mutate(EffectSizeSummary_RE2,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+EffectSizeSummary_RE2 <- mutate(EffectSizeSummary_RE2,
+                               order = case_when(rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
+                                              
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing")
+                               
+)
+
+EffectSizeSummary_RE_f2 <- EffectSizeSummary_RE2 %>% 
+  filter (EffectSizeSummary_RE2$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+```
+
+```{r 12(c). meta-analysis of average effect size incl. publication bias}
+dfinc_all$se = (dfinc_all$var_smd)^(1/2)
+
+meta_all <- rma.mv(smd, var_smd, random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+summary(meta_all)
+
+meta_all_se <-rma.mv(smd, var_smd, mods =  ~ se,
+                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+summary(meta_all_se)
+
+meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
+                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+summary(meta_all_smd)
+```
+
+```{r 13. meta-analysis plots}
+ggplot(EffectSizeSummary_RE, aes(x = label, y = beta)) + 
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "lightgrey") +
+  scale_y_continuous(limits = c(-1, 1.5)) +
+  scale_color_brewer(palette = "Dark2") +  
+  labs(x = "Number of interventions used", y = "") +
+  theme_bw() +
+  theme(
+    legend.position = "bottom", 
+    text = element_text(size = 7),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) + 
+  guides(color = FALSE)
+
+# new data -- monetary value seems supre high, but not sure it makes so much sense to look at it as it only has 2 obs
+# new data -- monetary, motivation, then social, info and feedback are all equal
+names(int_count) <- gsub("SocialComparison", "Social", names(int_count))
+names(int_count) <- gsub("MonetaryRewards", "Monetary", names(int_count))
+
+ggplot(EffectSizeSummary_RE, aes(y = paste0(label, " [", int_count[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # Horizontal error bars
+  theme_bw() +  # Minimal theme for a clean look
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") +  # Axis labels and title
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + # Vertical line at zero
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+# ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/2024-10-23-combined-results/ma-forest.png")
+```
+
+```{r 13(b) publication bias plots}
+
+ggplot(EffectSizeSummary_RE2, aes(y = paste0(label, " [", int_count[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # Horizontal error bars
+  theme_bw() +  # Minimal theme for a clean look
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") +  # Axis labels and title
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + # Vertical line at zero
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+library(lmtest)
+library(ggrepel)
+library(RColorBrewer)
+library(viridis)
+
+palette <- viridis(31)
+intervention_colors <- setNames(palette, unique(dfinc_all$intervention))
+
+### FUNNEL PLOT ###
+funnel(
+  dfinc_all$smd, 
+  v = dfinc_all$var_smd,
+  # ylim = c(0, 0.3),
+  col = intervention_colors[as.factor(dfinc_all$intervention)], 
+  legend = FALSE # We'll create the legend manually
+)
+
+legend("topright", # Position of the legend
+       legend = levels(as.factor(dfinc_all$intervention)), # Legend labels
+       col = intervention_colors,
+       pch = 15, # Point type (change if needed)
+       title = "Intervention", # Legend title
+       cex = 0.5,  # Make the legend text and symbols smaller
+       xpd = TRUE, # Allow the legend to be drawn outside the plot area
+       inset = c(0, 0), # Position the legend
+       bg = "white", # Set the background color to white
+       border = "white") # Set the border color to white
+dev.copy(png, "funnel_plot_legend.png", width = 480, height = 320)
+
+# Save the plot
+dev.off()
+```
+
+```{r 14. network meta-analysis incl. plots}
+# NMA
+# Set up data structure for nma
+df_meta_all <- dfinc_all %>%
+  dplyr::select(smd, var_smd, treatment, `documentID`, StudyDesign, Region, Opt_in_out, StatsMethod, Randomisation, medium, Geographic_Scope) %>%
+  rename(study = `documentID`, diff = smd, std.err = var_smd, Medium = medium) %>%
+  mutate(study_indp = row_number()) 
+
+df_meta_all <- df_meta_all %>%
+  bind_rows(
+    df_meta_all %>%
+      distinct(study_indp) %>%
+      mutate(treatment = "Control", diff = NA, std.err = NA, StudyDesign = NA)
+  ) %>%
+  arrange(study_indp, treatment)
+
+df_mc_all <- df_meta_all %>%
+  select(-c(study, StudyDesign, Region, Opt_in_out, StatsMethod, Randomisation, Medium, Geographic_Scope)) %>%
+  rename(study = study_indp)
+
+# Run NMA
+nma_result <- network_meta_analysis(df_mc_all)
+#forest(relative.effect(mc_results, t1 = "Control"))
+```
+
+```{r 15. calculate p-values for NMA results}
+nma_result$Summary_Results <- nma_result$Summary_Results %>%
+  mutate(
+    z_score = Mean / SD,  # Z-score formula
+    p_value = 2 * pnorm(-abs(z_score))  # Two-tailed p-value based on Z-score
+  )
+
+nma_result$Summary_Results <- nma_result$Summary_Results %>%
+  mutate(nma_result$Summary_Results,
+         sign = case_when(
+           p_value < 0.01 ~ "***",
+           p_value < 0.05 ~ "**",
+           p_value < 0.1 ~ "*"
+    
+  )
+  )
+```
+
+```{r 16. combine MA and NMA}
+nma_df <- nma_result$Summary_Results %>%
+  filter(Treatment != "sd.d") %>%  # Exclude 'sd.d'
+  mutate(Treatment = gsub("d.Control.", "", Treatment),  # Remove prefix
+         source = "NMA",
+         sucra = Mean) %>%
+  select(Treatment, sucra, source)
+
+ma_df <- EffectSizeSummary_RE2 %>%
+  mutate(Treatment = label,
+         source = "MA") %>%
+  replace_na(list(Treatment = "Control")) %>%
+  mutate(Treatment = ifelse(Treatment == "None", "Control", Treatment)) %>%
+  select(Treatment, beta, source)
+
+#plot_data <- rbind(nma_df, ma_df)
+#plot_data$Treatment <- factor(plot_data$Treatment, levels = unique(plot_data$Treatment))
+
+plot_data <- merge(nma_df,ma_df,by="Treatment")
+
+p <- ggplot(plot_data) +
+  # first layer: geom_point for sucra
+  geom_point(aes(x = reorder(Treatment, -sucra), y = sucra, color = "NMA"), size = 2) +
+  
+  # second layer: geom_point for beta
+  geom_point(aes(x = reorder(Treatment, -sucra), y = beta, color = "MA"), size = 2) +
+  
+  # manually setting the color for both groups
+  scale_color_manual(values = c("MA" = "red", "NMA" = "blue")) +
+  
+  # rotate x-axis text and customize axis and title
+  theme(axis.text.x = element_text(angle = 90, hjust = 0)) +
+  labs(x = "Treatment", y = "SMD / Beta", title = "Combined Plot of Treatments") +
+  
+  # remove the legend title
+  theme(legend.title = element_blank())
+
+#save the plot
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/nma-ma-sucra.png", plot = p, width = 8, height = 8, dpi = 300)
+```
+
+# after identifying and inspecting your outliers UPDATE dfinc processing in chunk #7
+# before running the analysis again #12-16 and comparing your results
+# unless you want your outliers to be included 
+```{r 17. identify outliers}
+meta_model <-rma.mv(smd, var_smd, mods =  ~ intervention+0, 
+                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+summary(meta_model)
+coef_summary <- coef(summary(meta_model))
+
+# identify outliers
+# these thresholds are identified by looking at the graphs and identifying the peaks
+# instead of applying a numeric threshold, we rather look at the graph and decide to examine and potentially exclude "outliers" (Fox, John. (1991). Regression Diagnostics: An Introduction. Sage Publications) 
+
+threshold <- 1
+#threshold <- 4/nrow(dfinc4)
+
+x5 <- cooks.distance(meta_model)
+plot(x5, type="l", pch=19, xlab="Observed Outcome", ylab="Cook's Distance")
+for (i in 1:length(x5)) {
+  if (x5[i] > 0.1) {
+    text(i, x5[i], i, cex = 1, pos = 4, col = "red")
+  }
+}
+
+#70, 235, 272, 273
+# 70 - Meub et al. 2019 report a VERY low SE compared to the size of difference of means, which leads to a t-stat of 128
+# 235 - Matsukawa 2018 also report VERY low SEs compared to the size of coeffcients, which leads to very large t-stats
+# 272, 273 Staats et al. 2004 nothing visibly different
+
+below_threshold_rows5 <- which(x5 < threshold)
+dfinc5 <- dfinc4[below_threshold_rows5,]
+above_threshold_rows5 <- which(x5 > threshold)
+outlier_cooksd5 <- dfinc4[above_threshold_rows5,]
+
+```
+
+```{r 18. network meta-regression and heterogeneity analysis}
+# NMR (Can be extended to risk of bias analysis)
+
+# prepare data
+# Analyze study design = did
+df_studydesign_all <- prep_mcr_df(df_meta_all, 'StudyDesign', 'DID', 'studydesign')
+
+# Analyze region = Asia
+df_region_all <- prep_mcr_df(df_meta_all, 'Region', 'Asia', 'region')
+
+# Analyze OptedIn = 'Yes'
+df_optedin_all <- prep_mcr_df(df_meta_all, 'OptedIn', 'Yes', 'optedin')
+
+# Analyze StatsMethod = 'PanelEffects'
+df_statsmethod_all <- prep_mcr_df(df_meta_all, 'StatsMethod', 'PanelEffects', 'statsmethod')
+
+# Analyze Randomisation = 'Yes'
+df_randomisation_all <- prep_mcr_df(df_meta_all, 'Randomisation', 'Yes', 'randomisation')
+
+# Analyze medium = 'mail'
+df_medium_all <- prep_mcr_df(df_meta_all, 'Medium', 'mail', 'medium')
+
+# Analyze Geographic Scope = 'Macro'
+df_geographic_scope_all <- prep_mcr_df(df_meta_all, 'Geographic_Scope', 'Macro', 'geographic_scope')
+
+# List dataframe for NMR
+covariate_list <- list(studydesign = df_studydesign_all,
+                       region = df_region_all,
+                       # optedin = df_optedin_all,
+                       statsmethod = df_statsmethod_all,
+                       # randomisation = df_randomisation_all,
+                       medium = df_medium_all,
+                       geographic_scope = df_geographic_scope_all)
+
+# Run NMR and collect results
+results_list_all <- lapply(names(covariate_list), function(x) network_meta_regression(df_mc_all, covariate_list[[x]], x))
+nmr_results_all_df <- do.call(rbind, results_list_all)
+
+print(nmr_results_all_df)
+```
+
+```{r 19. analysis with audit separate - process intervention variables}
+# ANALYSIS USING 7 MAIN CATEGORIES MAPPING - FEEDBACK, INFORMATION, HOMEAUDIT, SOCIAL, MOTIVATION, MONETARYREWARDS, DYNAMICPRICING 
+
+## Prepare Interventions for Analysis
+dfinc_audit <- dfinc %>%
+  mutate(
+    Feedback = ifelse(`Historical` == 1  | `Home Energy Report` == 1 | `In home display` == 1 | `Smart Metering` == 1, 1, 0),
+    Information = ifelse(`Awareness Campaign` == 1 | `Bills` == 1 | `tips` == 1, 1, 0),
+    HomeAudit = ifelse(`Home audits` == 1, 1, 0),
+    SocialComparison = ifelse(`Injunctive Norm / Social Norm` == 1 | `peer comparison` == 1, 1, 0),
+    Motivation = ifelse(`Commitment strategies` == 1 | `Competition` == 1 | `Gamification` == 1 | `Goal Setting` == 1 | `Moral suasion` == 1, 1, 0),
+    DynamicPricing = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1,  1, 0),
+    MonetaryRewards = ifelse(`Rewards` == 1, 1, 0)
+  ) %>% 
+  replace_na(list(
+    Feedback = 0,
+    Information = 0,
+    HomeAudit = 0,
+    SocialComparison = 0,
+    Motivation = 0,
+    DynamicPricing = 0,
+    MonetaryRewards = 0
+  )) %>%
+  mutate(Feedback_2 = ifelse(Feedback == 1, "Feedback1", "Feedback0")) %>% 
+  mutate(Information_2 = ifelse(Information == 1, "Information1", "Information0")) %>% 
+  mutate(HomeAudit_2 = ifelse(HomeAudit == 1, "HomeAudit1", "HomeAudit0")) %>%
+  mutate(SocialComparison_2 = ifelse(SocialComparison == 1, "SocialComparison1", "SocialComparison0")) %>% 
+  mutate(Motivation_2 = ifelse(Motivation == 1, "Motivation1", "Motivation0")) %>% 
+  mutate(MonetaryRewards_2 = ifelse(MonetaryRewards == 1, "MonetaryRewards1", "MonetaryRewards0")) %>%
+  mutate(DynamicPricing_2 = ifelse(DynamicPricing == 1, "DynamicPricing1", "DynamicPricing0")) %>%
+  mutate(Treatment1 = paste(Feedback_2, Information_2, HomeAudit_2, SocialComparison_2, Motivation_2, MonetaryRewards_2, DynamicPricing_2, sep = ":")) %>%
+  filter(Treatment1 != "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0") %>%
+  mutate(treatment = mapping_vector_audit_rw[Treatment1]) 
+
+# intervention combination with >=5 observations 
+# execute if you want to exclude studies that has intervention types with < 5 observations
+treat_counts <- dfinc_audit %>%
+  group_by(treatment) %>%
+  summarise(count = n(), .groups = 'drop')
+treats_to_remove <- treat_counts %>%
+  filter(count < 5) %>%
+  select(treatment, count)
+print(treats_to_remove)
+
+# more data exclusion criteria
+dfinc_audit <- dfinc_audit %>%
+#   filter(total_sample_size <= quantile(dfinc_audit$total_sample_size, 0.97)) %>% 
+  # exclude studies with top 3% sample size
+  filter(!(treatment %in% treats_to_remove$treatment)) 
+# exclude studies with intervention type that has < 5 observations
+```
+
+```{r 20. analysis with audit separate - meta-analysis }
+### MA ### 
+# process intervention variables
+
+dfinc_audit <- dfinc_audit %>%
+  mutate(intervention = apply(select(., Feedback, Information, HomeAudit, SocialComparison, Motivation, MonetaryRewards, DynamicPricing), 1, function(row) {
+    cols <- names(row)[which(row == 1)]   # get names of columns where the value is 1
+    if(length(cols) > 0) {
+      paste(cols, collapse = "_")         # concatenate with underscore
+    } else {
+      NA                                  # if no values are 1, set to NA
+    }
+  }))
+
+dfinc_audit$InterventionID <- 1:nrow(dfinc_audit)
+
+dfinc_audit$Feedback <- factor(dfinc_audit$Feedback)
+dfinc_audit$Information <- factor(dfinc_audit$Information)
+dfinc_audit$HomeAudit <- factor(dfinc_audit$HomeAudit)
+dfinc_audit$SocialComparison <- factor(dfinc_audit$SocialComparison)
+dfinc_audit$Motivation <- factor(dfinc_audit$Motivation)
+dfinc_audit$MonetaryRewards <- factor(dfinc_audit$MonetaryRewards)
+dfinc_audit$DynamicPricing <- factor(dfinc_audit$DynamicPricing)
+
+# use this for showing n observarions per intervention
+int_count_audit <- table(dfinc_audit$intervention)
+
+# MA (Comparing interventions in a meta regression model and interactions)
+
+# dfinc_audit <- dfinc_audit %>%
+#  filter (intervention %in% c("Feedback","Information","HomeAudit","SocialComparison","Motivation","MonetaryRewards", "DynamicPricing"))
+
+EffectSizeSummary_RE_audit <- data_frame() 
+
+EffectSizeSummary_RE_audit <- rbind(EffectSizeSummary_RE_audit,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_audit, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:HomeAudit:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
+                                             
+                                )
+                                )
+  )
+
+EffectSizeSummary_RE_audit <- separate(EffectSizeSummary_RE_audit, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information","HomeAudit", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+EffectSizeSummary_RE_audit <- mutate(EffectSizeSummary_RE_audit,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               HomeAudit = as.numeric(recode(HomeAudit, "HomeAudit1" = 1, "HomeAudit0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+EffectSizeSummary_RE_audit <- mutate(EffectSizeSummary_RE_audit,
+                               order = case_when(rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","HomeAudit", "DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","HomeAudit", "DynamicPricing" )])==5 ~ 5,
+                                                 rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==6 ~ 6,
+                                                 rowSums(EffectSizeSummary_RE_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==7 ~ 7,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation",
+  "Feedback0:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Audit",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary",
+  "Feedback0:Information1:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Audit",
+  "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Audit",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+  
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing",
+  "Feedback0:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Audit_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Audit_DynamicPricing",
+  "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Audit_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing"
+  )
+                               
+)
+
+EffectSizeSummary_RE_audit_f <- EffectSizeSummary_RE_audit %>% 
+  filter (EffectSizeSummary_RE_audit$label %in% c("Information","Feedback","Audit","Social","Monetary","DynamicPricing","Motivation"))
+```
+
+```{r}
+EffectSizeSummary_RE2_audit <- data_frame() 
+
+EffectSizeSummary_RE2_audit <- rbind(EffectSizeSummary_RE2_audit,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_audit, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:HomeAudit:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0+var_smd
+                                             
+                                )
+                                )
+  )
+
+EffectSizeSummary_RE2_audit <- separate(EffectSizeSummary_RE2_audit, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information","HomeAudit", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+EffectSizeSummary_RE2_audit <- mutate(EffectSizeSummary_RE2_audit,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               HomeAudit = as.numeric(recode(HomeAudit, "HomeAudit1" = 1, "HomeAudit0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+EffectSizeSummary_RE2_audit <- mutate(EffectSizeSummary_RE2_audit,
+                               order = case_when(rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","HomeAudit", "DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","HomeAudit", "DynamicPricing" )])==5 ~ 5,
+                                                 rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==6 ~ 6,
+                                                 rowSums(EffectSizeSummary_RE2_audit[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information", "HomeAudit", "DynamicPricing" )])==7 ~ 7,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation",
+  "Feedback0:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Audit",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary",
+  "Feedback0:Information1:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Audit",
+  "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Audit",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+  
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing",
+  "Feedback0:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Audit_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing",
+  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Audit_DynamicPricing",
+  "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Audit_DynamicPricing",
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing"
+  )
+                               
+)
+
+EffectSizeSummary_RE2_audit_f <- EffectSizeSummary_RE2_audit %>% 
+  filter (EffectSizeSummary_RE2_audit$label %in% c("Information","Feedback","Audit","Social","Monetary","DynamicPricing","Motivation"))
+```
+
+```{r 21. analysis with audit separate - meta-analysis plots}
+### MA plots ###
+
+ggplot(EffectSizeSummary_RE_audit_f, aes(x = label, y = beta)) + 
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "lightgrey") +
+  scale_y_continuous(limits = c(-1, 1.5)) +
+  scale_color_brewer(palette = "Dark2") +  
+  labs(x = "Number of interventions used", y = "") +
+  theme_bw() +
+  theme(
+    legend.position = "bottom", 
+    text = element_text(size = 7),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) + 
+  guides(color = FALSE)
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/2024-10-24-combined-results/ma-scatterplot-audit.png")
+
+names(int_count_audit) <- gsub("SocialComparison", "Social", names(int_count_audit))
+names(int_count_audit) <- gsub("MonetaryRewards", "Monetary", names(int_count_audit))
+names(int_count_audit) <- gsub("HomeAudit", "Audit", names(int_count_audit))
+
+ggplot(EffectSizeSummary_RE_audit, aes(y = paste0(label, " [", int_count_audit[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # Horizontal error bars
+  theme_bw() +  # Minimal theme for a clean look
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") +  # Axis labels and title
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + # Vertical line at zero
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/2024-10-24-combined-results/ma-forest-audit.png")
+```
+
+```{r 21(b). analysis with audit separate - meta-analysis with publication bias plots}
+### MA plots ###
+
+ggplot(EffectSizeSummary_RE2_audit_f, aes(x = label, y = beta)) + 
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "lightgrey") +
+  scale_y_continuous(limits = c(-1, 1.5)) +
+  scale_color_brewer(palette = "Dark2") +  
+  labs(x = "Number of interventions used", y = "") +
+  theme_bw() +
+  theme(
+    legend.position = "bottom", 
+    text = element_text(size = 7),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) + 
+  guides(color = FALSE)
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/2024-10-24-combined-results/ma-scatterplot-audit-publicationbiasadjusted.png")
+
+names(int_count_audit) <- gsub("SocialComparison", "Social", names(int_count_audit))
+names(int_count_audit) <- gsub("MonetaryRewards", "Monetary", names(int_count_audit))
+names(int_count_audit) <- gsub("HomeAudit", "Audit", names(int_count_audit))
+
+ggplot(EffectSizeSummary_RE2_audit, aes(y = paste0(label, " [", int_count_audit[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # Horizontal error bars
+  theme_bw() +  # Minimal theme for a clean look
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") +  # Axis labels and title
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + # Vertical line at zero
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/results/ma-forest-audit-publicationbias.png")
+```
+
+```{r 22. analysis with audit separate - network meta-analysis incl. plots}
+### NMA ###
+
+# set up data structure for nma
+df_meta_audit <- dfinc_audit %>%
+  dplyr::select(smd, var_smd, treatment, `document ID`, StudyDesign, Region, Opt_in_out, StatsMethod, Randomisation, medium, Geographic_Scope) %>%
+  rename(study = `document ID`, diff = smd, std.err = var_smd, Medium = medium) %>%
+  mutate(study_indp = row_number()) 
+
+df_meta_audit <- df_meta_audit %>%
+  bind_rows(
+    df_meta_audit %>%
+      distinct(study_indp) %>%
+      mutate(treatment = "Control", diff = NA, std.err = NA, StudyDesign = NA)
+  ) %>%
+  arrange(study_indp, treatment)
+
+df_mc_audit <- df_meta_audit %>%
+  select(-c(study, StudyDesign, Region, Opt_in_out, StatsMethod, Randomisation, Medium, Geographic_Scope)) %>%
+  rename(study = study_indp)
+
+# run NMA incl. plots
+nma_result_audit <- network_meta_analysis(df_mc_audit)
+
+# not all treatments have been correctly mapped 
+```
+
+```{r 23. analysis with audit separate - combine MA and NMA}
+### MA and NMA combined ###
+nma_df_audit <- nma_result_audit$Summary_Results %>%
+  filter(Treatment != "sd.d") %>%  # Exclude 'sd.d'
+  mutate(Treatment = gsub("d.Control.", "", Treatment),  # Remove prefix
+         source = "NMA",
+         sucra = Mean) %>%
+  select(Treatment, sucra, source)
+
+ma_df_audit <- EffectSizeSummary_RE2_audit %>%
+  mutate(Treatment = label,
+         source = "MA") %>%
+  replace_na(list(Treatment = "Control")) %>%
+  mutate(Treatment = ifelse(Treatment == "None", "Control", Treatment)) %>%
+  select(Treatment, beta, source)
+
+plot_data_audit <- merge(nma_df_audit,ma_df_audit,by="Treatment")
+
+p_audit <- ggplot(plot_data_audit) +
+  # first layer: geom_point for sucra
+  geom_point(aes(x = reorder(Treatment, -sucra), y = sucra, color = "NMA"), size = 2) +
+  
+  # second layer: geom_point for beta
+  geom_point(aes(x = reorder(Treatment, -sucra), y = beta, color = "MA"), size = 2) +
+  
+  # manually setting the color for both groups
+  scale_color_manual(values = c("MA" = "red", "NMA" = "blue")) +
+  
+  # rotate x-axis text and customize axis and title
+  theme(axis.text.x = element_text(angle = 90, hjust = 0)) +
+  labs(x = "Treatment", y = "SMD / Beta", title = "Combined Plot of Treatments") +
+  
+  # remove the legend title
+  theme(legend.title = element_blank())
+print(p_audit)
+#save the plot
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/results/nma-ma-sucra-audit-publicationbiasadjusted.png", plot = p, width = 8, height = 8, dpi = 300)
+```
+
+```{r 24. write summary statistics}
+# factor variables
+sumVarsFactor <- c("intervention",
+                   "Opt_in_out",
+                   "StatsMethod",
+                   "StudyDesign",
+                   "Randomisation",
+                   "Region",
+                   "Weather",
+                   "cat_criterion1",
+                   "cat_criterion2",
+                   "cat_criterion5",
+                   "cat_criterion6",
+                   "cat_criterion7")
+
+# numeric variables
+sumvarsNum <- c("smd",
+                "var_smd")
+
+dfinc_all[sumVarsFactor] <- lapply(dfinc_all[sumVarsFactor], factor)
+dfinc_all[sumvarsNum] <- lapply(dfinc_all[sumvarsNum], as.numeric)
+
+for(col in names(select(dfinc_all,all_of(sumVarsFactor)))) {
+  freq_table <- freq(dfinc_all[[col]], style = "rmarkdown", cumul=FALSE, report.nas = FALSE, totals = FALSE)
+  print(freq_table)
+}
+
+dfinc_all %>%
+  select(all_of(c(sumVarsFactor,sumvarsNum))) %>% 
+  dfSummary(graph.col = T, style = "grid", na.col = FALSE) %>%
+  print(file = "summarystatistics22012025.html")
+rmarkdown::render("summarystatistics22012025.html", output_file = "summarystatistics22012025.doc")
+```
+
+```{r 25. write summary statistics per intervention}
+
+dfinc4 <- dfinc_all %>% filter(dfinc_all$intervention %in% c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards", "DynamicPricing")) 
+
+# add audit as a separate category if desirable
+
+# write summary statistics for all different intervention categories
+# dfinc4 <- dfinc
+
+dfinc4[sumVarsFactor] <- lapply(dfinc4[sumVarsFactor], factor)
+dfinc4[sumvarsNum] <- lapply(dfinc4[sumvarsNum], as.numeric)
+
+# list of interventions
+unique_interventions <- unique(dfinc4$intervention)
+
+# Create an empty list to store the summary tables for each intervention
+summary_list <- list()
+
+# Loop through each intervention and create the summary
+for (interv in unique_interventions) {
+  # Filter the data for the specific intervention
+  df_interv <- dfinc4 %>% filter(intervention == interv)
+  
+  # Create the summary statistics for the filtered data
+  summary <- df_interv %>%
+    select(all_of(c(sumVarsFactor, sumvarsNum))) %>% 
+    dfSummary(graph.col = FALSE, style = "grid", na.col = FALSE)
+  
+  # Add the summary table to the list, with the name of the intervention as the title
+  summary_list[[interv]] <- summary
+}
+
+# Combine all summaries into a single data frame, with an extra column for the intervention
+combined_summary <- bind_rows(
+  lapply(names(summary_list), function(interv) {
+    summary_data <- summary_list[[interv]]
+    summary_data <- as.data.frame(summary_data)
+    summary_data$Intervention <- interv
+    return(summary_data)
+  })
+)
+
+# Save the combined summary as a single HTML file
+combined_summary %>%
+  kable("html", escape = FALSE, caption = "Summary Statistics by Intervention") %>%
+  kable_styling(full_width = TRUE) %>%
+  save_kable("summarystatistics_combined.html")
+
+# Convert the HTML to a DOC file using rmarkdown
+rmarkdown::render(
+  input = "summarystatistics_combined.html",
+  output_file = "summarystatistics_combined.doc"
+)
+```
+
+```{r 26. split the dataset by risk of bias levels}
+dfinc_all$se = (dfinc_all$var_smd)^(1/2)
+# including all effect sizes on 5 major interventions 
+# dfinclow <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "low")
+# dfincmed <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "medium")
+# dfinchigh <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "high")
+table(dfinc_all$cat_criterion1)
+
+dfinclow <- dfinc_all %>% filter(dfinc_all$cat_criterion7 == "1")
+#dfinclow <- dfinclow %>% filter (!dfinclow$intervention == "MonetaryRewards")
+# int_count_low <- table(dfinclow$intervention)
+# names(int_count_low) <- gsub("SocialComparison", "Social", names(int_count_low))
+# names(int_count_low) <- gsub("MonetaryRewards", "Monetary", names(int_count_low))
+
+dfincmed <- dfinc_all %>% filter(dfinc_all$cat_criterion7 == "2")
+# int_count_med <- table(dfincmed$intervention)
+# names(int_count_med) <- gsub("SocialComparison", "Social", names(int_count_med))
+# names(int_count_med) <- gsub("MonetaryRewards", "Monetary", names(int_count_med))
+
+dfinchigh <- dfinc_all %>% filter(dfinc_all$cat_criterion7 == "3")
+# int_count_high <- table(dfinchigh$intervention)
+# names(int_count_high) <- gsub("SocialComparison", "Social", names(int_count_high))
+# names(int_count_high) <- gsub("MonetaryRewards", "Monetary", names(int_count_high))
+
+# dfinclowmed <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "low" | dfinc_all$cat_criteria_sum == "medium")
+# int_count_lowmed <- table(dfinclowmed$intervention)
+# names(int_count_lowmed) <- gsub("SocialComparison", "Social", names(int_count_lowmed))
+# names(int_count_lowmed) <- gsub("MonetaryRewards", "Monetary", names(int_count_lowmed))
+# dfinclowmed <- dfinclowmed %>% filter (!dfinclowmed$intervention == "MonetaryRewards")
+```
+
+```{r 26 (b). meta-analysis of average effect size incl. publication bias split by risk of bias by criterion and overall}
+
+datasets <- list(high = dfinchigh, med= dfincmed, low = dfinclow)
+
+# define function to run models and print summaries
+run_meta_models <- function(data, group_name) {
+  cat("\nResults for", group_name, "level of criterion 7 bias:\n")
+  
+  # Model 1: no moderators
+  meta_all <- rma.mv(smd, var_smd, random = ~ as.factor(effectID) | as.factor(documentID), data = data, method = "REML")
+  cat("\nModel 1 (No Moderators):\n")
+  print(summary(meta_all))
+
+  # Model 2: moderator = se
+  meta_all_se <- rma.mv(smd, var_smd, mods = ~ se, random = ~ as.factor(effectID) | as.factor(documentID), data = data, method = "REML")
+  cat("\nModel 2 (Moderator: se):\n")
+  print(summary(meta_all_se))
+
+  # Model 3: moderator = var_smd
+  meta_all_smd <- rma.mv(smd, var_smd, mods = ~ var_smd, random = ~ as.factor(effectID) | as.factor(documentID), data = data, method = "REML")
+  cat("\nModel 3 (Moderator: var_smd):\n")
+  print(summary(meta_all_smd))
+}
+
+# loop over the datasets
+for (group_name in names(datasets)) {
+  run_meta_models(datasets[[group_name]], group_name)
+}
+```
+
+```{r 27. meta-analysis on studies with low risk of bias}
+effectisizesummary_re_low <- data_frame() 
+# does not achieve convergence
+effectisizesummary_re_low <- rbind(effectisizesummary_re_low,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinclow, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
+                                             
+                                )
+                                )
+  )
+
+effectisizesummary_re_low<- separate(effectisizesummary_re_low, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+effectisizesummary_re_low <- mutate(effectisizesummary_re_low,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+effectisizesummary_re_low <- mutate(effectisizesummary_re_low,
+                               order = case_when(rowSums(effectisizesummary_re_low[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(effectisizesummary_re_low[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(effectisizesummary_re_low[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(effectisizesummary_re_low[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(effectisizesummary_re_low[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(effectisizesummary_re_low[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
+                                              
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing")
+                               
+)
+
+effectisizesummary_re_low_f <- effectisizesummary_re_low %>% 
+  filter (effectisizesummary_re_low$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+```
+```{r 27. meta-analysis on studies with low risk of bias}
+# display the same graph
+ggplot(effectisizesummary_re_low, aes(y = paste0(label, " [", int_count_low[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  
+  theme_bw() +  
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + 
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/1cat-low.png", width = 6, height = 6, dpi = 300)
+```
+
+```{r 28. meta-analysis on studies with medium risk of bias}
+# run the REML and display on the same graph
+effectisizesummary_re_med <- data_frame() 
+# does not achieve convergence
+effectisizesummary_re_med <- rbind(effectisizesummary_re_med,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinclow, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
+                                             
+                                )
+                                )
+  )
+
+effectisizesummary_re_med<- separate(effectisizesummary_re_med, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+effectisizesummary_re_med <- mutate(effectisizesummary_re_med,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+effectisizesummary_re_med <- mutate(effectisizesummary_re_med,
+                               order = case_when(rowSums(effectisizesummary_re_med[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(effectisizesummary_re_med[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(effectisizesummary_re_med[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(effectisizesummary_re_med[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(effectisizesummary_re_med[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(effectisizesummary_re_med[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
+                                              
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing")
+                               
+)
+
+effectisizesummary_re_med_f <- effectisizesummary_re_med %>% 
+  filter (effectisizesummary_re_med$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+
+# feedback_socialcomparison_motivation seems to have a very strange effect 
+# d <- dfincmed %>% filter(dfincmed$intervention == "Feedback_SocialComparison_Motivation")
+
+```
+```{r 28. meta-analysis on studies with medium risk of bias graph}
+ggplot(effectisizesummary_re_med, aes(y = paste0(label, " [", int_count_med[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  
+  theme_bw() +  
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + 
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+# feedback_socialcomparison_motivation seems to have a very strange effect 
+# d <- dfincmed %>% filter(dfincmed$intervention == "Feedback_SocialComparison_Motivation")
+
+ ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/2cat-med.png", width = 6, height = 6, dpi = 300)
+```
+
+```{r 29. meta-analysis on studies with high risk of bias with graphs}
+# run the REML and display on the same graph
+effectisizesummary_re_high <- data_frame() 
+# does not achieve convergence
+effectisizesummary_re_high <- rbind(effectisizesummary_re_high,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinchigh, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
+                                             
+                                )
+                                )
+  )
+
+effectisizesummary_re_high<- separate(effectisizesummary_re_high, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+effectisizesummary_re_high <- mutate(effectisizesummary_re_high,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+effectisizesummary_re_high <- mutate(effectisizesummary_re_high,
+                               order = case_when(rowSums(effectisizesummary_re_high[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(effectisizesummary_re_high[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(effectisizesummary_re_high[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(effectisizesummary_re_high[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(effectisizesummary_re_high[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(effectisizesummary_re_high[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
+                                              
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing")
+                               
+)
+
+effectisizesummary_re_high_f <- effectisizesummary_re_high %>% 
+  filter (effectisizesummary_re_high$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+
+ggplot(effectisizesummary_re_high, aes(y = paste0(label, " [", int_count_high[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  
+  theme_bw() +  
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + 
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/7cat-high.png", width = 6, height = 6, dpi = 300)
+```
+
+```{r 30. meta-analysis on studies with low-medium risk of bias}
+
+# run the REML and display on the same graph
+effectisizesummary_re_lowmed <- data_frame() 
+# does not achieve convergence
+effectisizesummary_re_lowmed <- rbind(effectisizesummary_re_lowmed,
+                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinclowmed, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
+                                             
+                                )
+                                )
+  )
+
+effectisizesummary_re_lowmed<- separate(effectisizesummary_re_lowmed, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
+
+effectisizesummary_re_lowmed <- mutate(effectisizesummary_re_lowmed,
+                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
+                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
+                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
+                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
+                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
+                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
+                               All=1
+)
+
+effectisizesummary_re_lowmed <- mutate(effectisizesummary_re_lowmed,
+                               order = case_when(rowSums(effectisizesummary_re_lowmed[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
+                                                 rowSums(effectisizesummary_re_lowmed[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
+                                                 rowSums(effectisizesummary_re_lowmed[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
+                                                 rowSums(effectisizesummary_re_lowmed[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
+                                                 rowSums(effectisizesummary_re_lowmed[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
+                                                 rowSums(effectisizesummary_re_lowmed[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
+                               
+                               label = recode(model1,
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
+                                              
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
+                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
+                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
+                                              
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
+                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
+                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
+                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
+                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing")
+                               
+)
+
+effectisizesummary_re_lowmed_f <- effectisizesummary_re_lowmed %>% 
+  filter (effectisizesummary_re_lowmed$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+
+ggplot(effectisizesummary_re_lowmed, aes(y = paste0(label, " [", int_count_lowmed[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # Effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  
+  theme_bw() +  
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + 
+  #coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1),
+         panel.grid = element_blank())+ 
+  xlim(-0.8,3.5) +
+    geom_text(aes(
+    label = ifelse(pvalues < 0.01,
+                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                   ifelse(pvalues < 0.05,
+                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          ifelse(pvalues < 0.1,
+                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
+    x = 2.1), hjust = 0, size = 3)
+
+ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/7cat-lowmed.png", width = 6, height = 6, dpi = 300)
+
+```
+```{r 30. meta-analysis on studies with low-medium risk of bias}
+
+# run the REML and display on the same graph
+meta_modellowmed <-rma.mv(smd, var_smd, mods =  ~Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0, 
+                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinclowmed, method = "REML")
+summary(meta_modellowmed)
+
+coef_summarylowmed <- coef(summary(meta_modellowmed))
+average_estimatelowmed <- mean(coef_summarylowmed$estimate)
+rownames(coef_summarylowmed) <- mapping_vector[rownames(coef_summarylowmed)]
+
+ggplot(coef_summarylowmed, aes(y = reorder(rownames(coef_summarylowmed),-estimate), x = estimate)) +
+  geom_point() +  # Effect size points
+  geom_errorbarh(aes(xmin = ci.lb, xmax = ci.ub), height = 0, color="red") +  # Horizontal error bars
+  theme_bw() +  # Minimal theme for a clean look
+  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") +  # Axis labels and title
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey") + # Vertical line at zero
+  coord_flip() +
+  theme (axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  ggtitle("Meta-analysis of studies with low-medium overall risk of bias")
+
+#ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/outlier-test/lowmedoverallrob-forest.png", width = 6, height = 6, dpi = 300)
+
+```
+
+```{r 32. print regression outputs}
+
+# print regression outputs to console
+
+#screenreg == summary
+
+named_list <- as.list(mapping_vector)
+
+# need to apply mapping_vector[]
+screenreg(meta_model, custom.coef.map = named_list, custom.model.names = "Method: Multilevel")
+
+# the model specification was rather different in the NE 2021 paper
+# were the outputs produced for each intervention as a separate model run?
+# 
+# screenreg(list(rma.mv.All, rma.mv.Feedback, rma.mv.Information, rma.mv.MonetaryIncentives, rma.mv.Motivation, rma.mv.SocialComparison),
+#           custom.model.names = c("All", "Feedback","Information", "MonetaryIncentives","Motivation",  "SocialComparison"),
+#           caption = "Method: Multilevel")
+# 
+# 
+# # output to word
+# htmlreg(list(rma.All, rma.Feedback, rma.Information, rma.MonetaryIncentives, rma.Motivation, rma.SocialComparison),
+#         custom.model.names = c("All", "Feedback","Information", "MonetaryIncentives","Motivation",  "SocialComparison"),
+#         caption = "Method: RE-REML",
+#         file = "Output/MetaRegression - REML.doc",
+#         inline.css = FALSE, doctype = TRUE, html.tag = TRUE, head.tag = TRUE, body.tag = TRUE
+# )
+
+```
+
+```{r 33. heterogeneity analysis}
+dfinc_all <- dfinc_all %>%
+  group_by('document ID') %>%
+  mutate(InterventionID = ifelse(is.na(InterventionID), 
+                               seq_len(n()),
+                               InterventionID)) %>%
+  ungroup() 
+
+ # InterventionDuration is a non-factor variable, so we probably need to recode it or exclude 
+for (x in c("Information", "SocialComparison","Feedback","MonetaryRewards","DynamicPricing")) {
+      assign(paste0("rma.",x),
+                 tidy2.reg(rma(yi=smd, vi = var_smd, method="REML", data = dfinc_all[dfinc_all[x] ==1,], test = "knha"
+                           ,mods = ~
+                            StudyDesign + Randomisation + StatsMethod +
+                            Weather + HouseholdType + ResidenceType  +
+                            OptedIn + InterventionDuration +
+                            Region + StudyYear
+                           )),
+      )
+      # assign(paste0("rma.mv.",x),
+      # 
+      #        tidy3.reg(rma.mv(zi, vi, random = ~ as.factor(InterventionID) | `document ID`, data = dfinc[dfinc[x] ==1,], method = "REML",
+      #                         mods = ~
+      #                           StudyDesign + Randomisation + StatsMethod + 
+      #                           Weather + HouseholdType + ResidenceType  +
+      #                           OptedIn + InterventionDuration +
+      #                           Region + StudyYear
+      #                         
+      # 
+      #        )),
+      # )
+}
+
+
+# print regression outputs to console
+
+screenreg(list(rma.Information, rma.SocialComparison, rma.Feedback, rma.MonetaryRewards, rma.DynamicPricing),
+          custom.model.names = c("Information", "SocialComparison","Feedback","MonetaryRewards","DynamicPricing"),
+          caption = "Method: RE-REML")
+
+# screenreg(list(rma.mv.All, rma.mv.Feedback, rma.mv.Information, rma.mv.MonetaryIncentives, rma.mv.Motivation, rma.mv.SocialComparison),
+#           custom.model.names = c("All", "Feedback","Information", "MonetaryIncentives","Motivation",  "SocialComparison"),
+#           caption = "Method: Multilevel")
+
+# output to word
+htmlreg(list(rma.Information, rma.SocialComparison, rma.Feedback, rma.MonetaryRewards, rma.DynamicPricing),
+        custom.model.names = c("Information", "SocialComparison","Feedback","MonetaryRewards","DynamicPricing"),
+        caption = "Method: RE-REML",
+        file = "MetaRegression - REML.doc",
+        inline.css = FALSE, doctype = TRUE, html.tag = TRUE, head.tag = TRUE, body.tag = TRUE
+)
+
+# htmlreg(list(rma.mv.All, rma.mv.Feedback, rma.mv.Information, rma.mv.MonetaryIncentives, rma.mv.Motivation, rma.mv.SocialComparison),
+#         custom.model.names = c("All", "Feedback","Information", "MonetaryIncentives","Motivation",  "SocialComparison"),
+#         caption = "Method: RE-MV",
+#         file = "Output/MetaRegression - MV.doc",
+#         inline.css = FALSE, doctype = TRUE, html.tag = TRUE, head.tag = TRUE, body.tag = TRUE
+# )
+
+```
+
+
+
+
+
+
