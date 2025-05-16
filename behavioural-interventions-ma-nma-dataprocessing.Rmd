@@ -1,0 +1,514 @@
+---
+title: "behavioural-interventions-ma-nma-data-processing"
+author: "diana danilenko"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r 0. setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r 1. load libraries}
+library(dplyr)
+library(ggplot2)
+library(texreg)
+library(tidyverse) 
+library(summarytools)
+library(rmarkdown) 
+library(devtools)
+library(clubSandwich)
+library(cowplot)
+library(ggrepel) 
+library(igraph)
+library(nmarank)
+library(knitr)
+library(kableExtra)
+library(gemtc)
+library(rjags)
+library(gridExtra)
+library(readr)
+library(boot)
+library(haven)
+library(stringr)
+library(shiny)
+library(readxl)
+```
+
+```{r 2. set working directory and load functions}
+# setwd("your working directory")
+source("functions_v1.R")
+source("functions_nma.R")
+```
+
+# only perform this if you have converted coefficients to smds and have mising data
+```{r 3. (opt.) complete data where possible and assign for manual completion otherwise}
+dfinc <- read_excel("C:/Users/dand/Downloads/Living_Review_Full_Text_Coding_Aditya.xlsx")
+
+dfinc <- dfinc %>%
+  filter(! is.na(Authors))
+dfinc <- dfinc %>%
+  filter(! is.na(coder))
+
+table(dfinc$ExclusionReasonLSR) 
+
+# filter out excluded studies
+dfinc <- dfinc %>% 
+  filter((is.na(ExclusionReasonLSR))|ExclusionReasonLSR =="NA"|ExclusionReasonLSR =="Na"|ExclusionReasonLSR =="na")
+
+num_cols <- c("test_statistic","coefficient", "coefficient_sd","total_sample_size","control_sample_size","treatment_sample_size","p_value")
+dfinc[num_cols] <- lapply(dfinc[num_cols], as.numeric)
+
+# record unique studies
+unique_studies <- dfinc %>%
+  distinct("documentID", Authors)
+
+summary(dfinc$test_statistic)
+
+# load the necessary package
+if (!requireNamespace("stats", quietly = TRUE)) {
+  install.packages("stats")
+}
+
+dfinc$df <- dfinc$total_sample_size - 1 # calculate degrees of freedom
+dfinc$alpha <- dfinc$p_value / 2  # alpha for each tail (two-tailed test)
+
+# calculate critical t-value where is.na(dfinc$test_statistic)
+dfinc$test_statistic <- ifelse(is.na(dfinc$test_statistic), qt(1 - dfinc$alpha, dfinc$df),dfinc$test_statistic) 
+
+summary(dfinc$test_statistic) 
+
+dfinc$df <- NULL
+dfinc$alpha <- NULL
+```
+
+```{r 4. load and pre-process data}
+# SPECIFY INPUT FILE HERE
+# dfinc <- readxl::read_xlsx("C:/Users/dand/Downloads/Living_Review_Full_Text_Coding_Aditya.xlsx")
+
+# process effect size variables 
+dfinc$effect_direction <- ifelse(dfinc$effect_direction == "decrease", -1, 
+                                  ifelse(dfinc$effect_direction == "increase", 1, NA))
+
+dfinc$PercentageChange <- abs(as.numeric(dfinc$PercentageChange))
+dfinc$test_statistic <- abs(as.numeric(dfinc$test_statistic))
+dfinc$study_design <- ifelse(dfinc$study_design == "Pre-test/ post-test", "Pre-test/post-test", dfinc$study_design)
+dfinc$significance_test <- ifelse(dfinc$significance_test == "f-test", "F-test", dfinc$significance_test)
+
+dfinc <- dfinc %>% 
+  filter(is.na(ExclusionReasonLSR) | ExclusionReasonLSR=='NA') %>%
+  mutate(across(c(PercentageChange,coefficient, coefficient_sd, control_mean, control_sample_size, control_sd, treated_mean, treatment_sample_size, treated_sd, total_sample_size, diff_mean, pooled_sd, p_value, test_statistic), as.numeric))
+
+dfinc <- dfinc %>%
+  mutate(Opt_in_out = case_when(
+    Opt_in_out == "Mandatory" ~ "No",
+    Opt_in_out %in% c("Opt in", "Opt out") ~ "Yes",
+    Opt_in_out == "Unclear" ~ NA_character_,
+    TRUE ~ Opt_in_out  # optional: retain other values if any
+  ))
+
+```
+
+```{r 4(b). process risk of bias data for completeness}
+rob_variables <- c(
+  "DataCausal", "ConfounderPossibility", "ConfounderAll", "ConfounderJustifiedOmission",
+  "ConfounderAccuracy", "ConfounderAnalysis", "SampleExchangeability", "SampleExclusion",
+  "SampleGroupComparability", "SampleGroupDifferenceIntervention", "SampleBiasAdjustment",
+  "AwareofStudy", "DataSelective", "DataSubgroups", "DataCausal", "StatsRecording",
+  "StatsDescriptiveError", "StatsInferentialError", "StatsInferentialViolation"
+)
+
+# apply the transformation to each variable
+for (var in rob_variables) {
+  # mutate the variable based on "no" and "yes" text presence
+  dfinc[[var]] <- ifelse(grepl("\\bno\\b", dfinc[[var]], ignore.case = TRUE), "No",
+                       ifelse(grepl("\\byes\\b", dfinc[[var]], ignore.case = TRUE), "Yes", NA))
+}
+
+# check the tables of mutated variables
+for (var in rob_variables) {
+  print(table(dfinc[[var]]))
+}
+```
+
+```{r 5. process risk of bias (critical appraisal) variables}
+# criterion 1: risk of confounding biases
+dfinc <- dfinc %>%
+  mutate(across(c(ConfounderPossibility, ConfounderAll, ConfounderJustifiedOmission, ConfounderAccuracy, ConfounderAnalysis), as.factor))
+
+dfinc['cat_criterion1'] <- NA
+dfinc$cat_criterion1 <- ifelse((dfinc$ConfounderPossibility == "No" | dfinc$ConfounderPossibility == "Seemingly no"), "low", 
+                                ifelse((dfinc$ConfounderAll == "No" | dfinc$ConfounderAll == "Seemingly no"),ifelse((dfinc$ConfounderJustifiedOmission == "No" | dfinc$ConfounderJustifiedOmission == "Seemingly no"),"high",ifelse((dfinc$ConfounderAnalysis == "No" | dfinc$ConfounderAnalysis == "Seemingly no"),"high","low")),
+                                       ifelse((dfinc$ConfounderAnalysis == "No" | dfinc$ConfounderAnalysis == "Seemingly no"),"medium","low")))
+
+table(dfinc$cat_criterion1)
+
+# criterion 2: risk of post-intervention/exposure selection biases
+dfinc <- dfinc %>%
+  mutate(across(c(SampleExchangeability, SampleExclusion, SampleGroupComparability, SampleGroupDifferenceIntervention, SampleBiasAdjustment), as.factor))
+
+dfinc['cat_criterion2'] <- NA
+
+dfinc$cat_criterion2 <- ifelse((dfinc$SampleExchangeability == "No" | dfinc$SampleExchangeability == "Seemingly no"),
+                                ifelse((dfinc$SampleGroupComparability == "No" | dfinc$SampleGroupComparability == "Seemingly no"),
+                                       ifelse((dfinc$SampleGroupDifferenceIntervention == "No" | dfinc$SampleGroupDifferenceIntervention == "Seemingly no"),"medium",
+                                              ifelse((dfinc$SampleBiasAdjustment == "No" | dfinc$SampleBiasAdjustment == "Seemingly no"),"high","medium")),"medium"),
+                                ifelse((dfinc$SampleExclusion == "No" | dfinc$SampleExclusion == "Seemingly no"  | dfinc$SampleExclusion == "Not applicable" | is.na(dfinc$SampleExclusion)),"low",ifelse((dfinc$SampleGroupComparability == "No" | dfinc$SampleGroupComparability == "Seemingly no"),
+                                                                                                                                ifelse((dfinc$SampleGroupDifferenceIntervention == "No" | dfinc$SampleGroupDifferenceIntervention == "Seemingly no"),"medium",
+                                                                                                                                       ifelse((dfinc$SampleBiasAdjustment == "No" | dfinc$SampleBiasAdjustment == "Seemingly no"),"high","medium")),"medium")))
+
+table(dfinc$cat_criterion2)
+
+# criterion 5: risk of detection biases
+dfinc <- dfinc %>%
+  mutate(across(c(AwareofStudy), as.factor))
+
+dfinc['cat_criterion5'] <- NA
+
+dfinc$cat_criterion5 <- ifelse((dfinc$AwareofStudy == "No" | dfinc$AwareofStudy == "Seemingly no" | dfinc$AwareofStudy == "Not applicable" | is.na(dfinc$AwareofStudy)),"low","high")
+
+# check that these NAs are actually "low"
+
+table(dfinc$cat_criterion5)
+
+# criterion 6: risk of outcome reporting biases
+dfinc <- dfinc %>%
+  mutate(across(c(DataSelective, DataSubgroups, DataCausal), as.factor))
+
+dfinc['cat_criterion6'] <- NA
+
+dfinc$cat_criterion6 <- ifelse((dfinc$DataSelective == "No" | dfinc$DataSelective == "Seemingly no"), 
+                                ifelse((dfinc$DataSubgroups == "No" | dfinc$DataSubgroups == "Seemingly no"), 
+                                ifelse((dfinc$DataCausal == "No" | dfinc$DataCausal == "Seemingly no"),"low","medium"),
+                                ifelse((dfinc$DataCausal == "No" | dfinc$DataCausal == "Seemingly no"),"medium","high")),
+                                ifelse((dfinc$DataSubgroups == "No" | dfinc$DataSubgroups == "Seemingly no"),
+                                       ifelse((dfinc$DataCausal == "No" | dfinc$DataCausal == "Seemingly no"),"medium","high"),"high"))
+
+table(dfinc$cat_criterion6)
+
+# criterion 7: risk of outcome assessment biases
+dfinc <- dfinc %>%
+  mutate(across(c(StatsRecording, StatsDescriptiveError, StatsInferentialError, StatsInferentialViolation), as.factor))
+
+dfinc['cat_criterion7'] <- NA
+
+dfinc$cat_criterion7 <- ifelse((dfinc$StatsRecording == "No" | dfinc$StatsRecording == "Seemingly no"),
+                                ifelse((dfinc$StatsDescriptiveError == "No" | dfinc$StatsDescriptiveError == "Seemingly no"),
+                                       ifelse((dfinc$StatsInferentialError == "No" | dfinc$StatsInferentialError == "Seemingly no"),"low","high"),
+                                       "high"),
+                                ifelse((dfinc$StatsDescriptiveError == "No" | dfinc$StatsDescriptiveError == "Seemingly no"),"medium","high"))
+
+table(dfinc$cat_criterion7)
+```
+
+```{r 6. summarise risk of bias values in 1 variable}
+dfinc <- dfinc %>%
+  mutate(across(c(cat_criterion1, cat_criterion2, cat_criterion5, cat_criterion6, cat_criterion7),
+                ~ case_when(
+                  . == "low" ~ 1,
+                  . == "medium" ~ 2,
+                  . == "high" ~ 3,
+                  TRUE ~ NA_real_
+                )))
+
+dfinc <- mutate(dfinc, 
+                cat_criteria_sum = cat_criterion1+cat_criterion2+cat_criterion5+cat_criterion6+cat_criterion7)
+dfinc <- mutate(dfinc,
+                cat_criteria_sum = case_when(cat_criteria_sum <= 5 ~"low",
+                                           ((cat_criteria_sum > 5) & (cat_criteria_sum <= 10)) ~ "medium",
+                                           cat_criteria_sum >10 ~ "high"))
+
+table(dfinc$cat_criteria_sum)
+```
+
+```{r 7. (opt.) exclude outliers or any other categories of observations}
+# when running the analysis for the first time, skip this and come back after chunk #17 on 'identify outliers using cook's d'
+# exclude outliers as identified based on cook's d and by looking at them (we exclude CPP and PLP later, which excludes 1 outlier)
+
+# exclude Meub et al. 2019 "23-182"
+dfinc <- dfinc %>% filter(! documentID == "23-182")
+# exclude Staats et al. 2004 "23-305"
+dfinc <- dfinc %>% filter(! documentID == "23-305")
+
+dfinc$`Critical Peak Pricing` <- as.numeric(dfinc$`Critical Peak Pricing`)
+dfinc$`Peak Load Pricing` <- as.numeric(dfinc$`Peak Load Pricing`)
+
+dfinc <- dfinc %>% filter(dfinc$`Critical Peak Pricing` == 0 | is.na(dfinc$'Critical Peak Pricing')) 
+dfinc <- dfinc %>% filter(dfinc$`Peak Load Pricing` == 0 | is.na(dfinc$'Peak Load Pricing'))
+```
+
+```{r 8. calculate smd and smd var}
+# CALCULATING STANDARDIZED SIZES AND VARIANCES
+
+# formulas taken from Ringquist
+# compute effect measures (r_coefficient, smd, fisher's z)
+dfinc <- mutate(dfinc,
+                # calculating r coefficient for regression results using sample_size  
+                # readjust the calculation as required based on the type of significance test
+                # currently we assume NAs, not specified and all other types as t-test 
+                r_coefficient = ifelse((significance_test == "t-test"), ((`test_statistic`)^2/((`test_statistic`)^2 + `total_sample_size`))^(1/2) * effect_direction * -1 , # result is adjusted for the effect direction and inverted.
+                                       ifelse((significance_test == "z-test" | significance_test == "X^2 Test"), (`test_statistic`^2/`total_sample_size`)^(1/2)* effect_direction * -1 , NA)), 
+
+
+                # calculating smd for experiments with difference of means results
+                pooled_sd = ifelse(is.na(pooled_sd) & study_design == "Pre-test/post-test", (((`treatment_sample_size`-1)*control_sd^2 + (`treatment_sample_size`-1)*treated_sd^2)/(`treatment_sample_size` + `treatment_sample_size` - 2))^(1/2),
+                                   ifelse(is.na(pooled_sd) & study_design != "Pre-test/post-test", (((`control_sample_size`-1)*control_sd^2 + (`treatment_sample_size`-1)*treated_sd^2)/(`control_sample_size` + `treatment_sample_size` - 2))^(1/2),
+                                          pooled_sd)),
+            
+                # calculate standardized mean differences
+                smd1= ifelse(`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA" , `diff_mean`/`pooled_sd`, NA),
+    
+                smd2= ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "F-test" | significance_test == "H-test") & study_design == "Control-treatment"),
+                             (`test_statistic`/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                             ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "F-test" | significance_test == "H-test") & study_design == "Difference in Difference"),
+                                    (`test_statistic`/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                                    ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "F-test" | significance_test == "H-test") & study_design == "Pre-test/post-test"),
+                                           (`test_statistic`/(`treatment_sample_size`)^2*(2*`treatment_sample_size`))^(1/2),   #using treatment sample = control sample
+                                           
+                                           ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "t-test" | significance_test == "z-test") & study_design == "Control-treatment"),
+                                                  `test_statistic` * (1/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                                                  ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "t-test" | significance_test == "z-test") & study_design == "Difference in Difference"),
+                                                         `test_statistic` * (1/`control_sample_size`/`treatment_sample_size`*(`treatment_sample_size` + `control_sample_size`))^(1/2),
+                                                         ifelse(((`statistical_technique` == "Difference of means" | `statistical_technique` == "ANOVA") & (significance_test == "t-test" | significance_test == "z-test") & study_design == "Pre-test/post-test"),
+                                                                `test_statistic` * (1/(`treatment_sample_size`)^2*(2*`treatment_sample_size`))^(1/2), #using treatment sample = control sample
+                                                                
+                                                                NA)))))),
+                
+                smd = smd1,
+                smd = ifelse(is.na(smd1), smd2, smd1),
+                
+                # converting d into r for difference of means regressions and ANOVA
+                r_coefficient = ifelse(`statistical_technique`  %in% c("Difference of means", "ANOVA"), smd/(smd^2+4)^(1/2), r_coefficient),
+                
+                # converting r into smd
+                smd = ifelse(
+                  is.na(smd1),
+                  2*r_coefficient/(1-r_coefficient^2)^0.5,
+                    smd1
+                  ),
+                
+                zi = 0.5 * log((1+r_coefficient) / (1-r_coefficient))
+)
+
+
+# Compute variance of effect measures
+dfinc <- mutate(dfinc,
+                # variance of r
+                var_r1 = (1-r_coefficient^2)^2/(`total_sample_size` - 1), 
+                var_r2 = coefficient_sd^2, 
+                var_r = var_r1,
+                var_r = ifelse(is.na(var_r1), var_r2, var_r1),
+ 
+                # variance of smd
+                var_smd = ifelse(control_sample_size>0, ((`control_sample_size`+`treatment_sample_size`)/(`control_sample_size`*`treatment_sample_size`)) + (smd^2/(2*(`control_sample_size`+`treatment_sample_size`))),
+                                 ((`treatment_sample_size`+`treatment_sample_size`)/(`treatment_sample_size`*`treatment_sample_size`)) + (smd^2/(2*(`treatment_sample_size`+`treatment_sample_size`)))),
+           
+                # coverting var_smd to var_r
+                var_r = ifelse(is.na(var_r),
+                               (4^2*var_smd)/((smd^2+4)^3),
+                               var_r),
+            
+                #converting var_r to var_smd
+                var_smd = ifelse(is.na(var_smd),
+                                 4*var_r/(1-r_coefficient^2)^3,
+                                 var_smd),
+           
+                # #variance of Zs
+                vi   = 1/(`total_sample_size` - 3)
+)
+
+# filter only observations with complete smd & var[smd]
+dfinc <- dfinc %>%
+  filter(!is.na(smd) & !is.na(var_smd))
+print(paste0(nrow(dfinc), " data can be used after all"))
+
+summary(dfinc$smd)
+```
+
+```{r 9. clean data and introduce controls}
+# DATA CLEANING AND CONTROLS
+dfinc$study_design <- as.factor(dfinc$study_design)
+
+table(dfinc$'randomisation_dummy')
+
+dfinc <- dfinc %>%
+  mutate(
+    randomisation_level = case_when(
+      `Randomisation method` %in% c("no", "No", "none", "not done", "Not randoized", "not randomized", "Not randomized") ~ "not randomised",
+      `Randomisation method` %in% c("Household", "household level", "Household level", "Household level randomization", 
+                                    "Household stratified randomization", "Individual Household", "individual Household - RCT", 
+                                    "Individual Household - RCT", "Individual Household -RCT", "Stratified random sampling at household level", 
+                                    "Room level randomization") ~ "household",
+      `Randomisation method` %in% c("Floor level randomisation", "geographically-contiguous “block batch”", 
+                                    "Grouped Household", "Grouped Household - Contiguous block group", 
+                                    "Grouped Household - randomized block design", "Grouped Household - RCT") ~ "group"
+    )
+  ) %>%
+  mutate(
+    randomisation_level = case_when(
+      is.na(randomisation_level) & randomisation_dummy %in% c("no", "No") ~ "not randomised",
+      is.na(randomisation_level) & randomisation_dummy %in% c("yes", "Yes") ~ "randomised",
+      TRUE ~ randomisation_level
+    )
+  )
+
+dfinc <- mutate(dfinc, 
+                ElectricityUse = `controls Electricity use`,
+                ElectricityPrice = `controls Energy prices`,
+                EnvironmentAttitudes =  `controls Environmental attitudes`,
+                HouseholdType =  `controls HH controls (demographics)`,
+                ResidenceType = `controls Residence controls`,
+                Season =   `controls Seasonal controls`,
+                Weather = `controls Weather controls`,
+                
+                Region = case_when(
+                  country %in% c("India") ~ 'Asia',
+                  country %in% c("Japan") ~ 'Asia',
+                  country %in% c("South Korea") ~ 'Asia',
+                  country %in% c("Singapore") ~ 'Asia',
+                  country %in% c("China") ~ 'Asia',
+                  country %in% c("Bangladesh") ~ 'Asia',
+                  country %in% c("Taiwan") ~ 'Asia',
+                  country %in% c("Thailand") ~ 'Asia',
+                  country %in% c("Vietnam") ~ 'Asia',
+                  
+                  country %in% c("Austria") ~ 'Europe excl. UK',
+                  country %in% c("Denmark") ~ 'Europe excl. UK',
+                  country %in% c("Finland") ~ 'Europe excl. UK',
+                  country %in% c("France") ~ 'Europe excl. UK',
+                  country %in% c("Germany") ~ 'Europe excl. UK',
+                  country %in% c("Italy") ~ 'Europe excl. UK',
+                  country %in% c("Latvia") ~ 'Europe excl. UK',
+                  country %in% c("Netherlands") ~ 'Europe excl. UK',
+                  country %in% c("Northern") ~ 'Europe excl. UK',
+                  country %in% c("Poland") ~ 'Europe excl. UK',
+                  country %in% c("Sweden") ~ 'Europe excl. UK',
+                  country %in% c("Switzerland") ~ 'Europe excl. UK',
+                  country %in% c("Ireland") ~ 'Europe excl. UK',
+                  country %in% c("Portugal") ~ 'Europe excl. UK',
+                  country %in% c("Spain") ~ 'Europe excl. UK',
+                  country %in% c("Lithuania") ~ 'Europe excl. UK',
+                  country %in% c("Moldova") ~ 'Europe excl. UK',
+                  country %in% c("Monaco") ~ 'Europe excl. UK',
+                  country %in% c("Serbia") ~ 'Europe excl. UK',
+                  country %in% c("Republic of Georgia") ~ 'Europe excl. UK',
+                  country %in% c("Romania") ~ 'Europe excl. UK',
+                  
+                  country %in% c("Australia") ~ 'Others',
+                  country %in% c("Colombia") ~ 'Others',
+                  country %in% c("Ecuador") ~ 'Others',
+                  country %in% c("Israel") ~ 'Others',
+                  country %in% c("South Africa") ~ 'Others',
+                  country %in% c("Canada") ~ 'Others',
+                  country %in% c("Mexico") ~ 'Others',
+                  country %in% c("Iran") ~ 'Others',
+                  country %in% c("Chile") ~ 'Others',
+                  country %in% c("Brasil", "Brazil") ~ 'Others',
+                  country %in% c("Ghana") ~ 'Others',
+                  
+                  country %in% c("United Kingdom", "England") ~ 'United Kingdom',
+                  country %in% c("United States") ~ 'United States',
+                  
+                  TRUE ~ country),
+                
+                StatsMethod = case_when( statistical_technique %in% c("Difference of means", "ANOVA") ~ "MeansDifferences",
+                                         # statistical_technique %in% c("Household Fixed effects regression ", "Time & Household Fixed effects regression ", "Fixed effects regression ",
+                                         #                              "Random effects regression ") ~ "PanelEffects",
+                                         statistical_technique %in% c("OLS regression") ~ "OLS",
+                                         TRUE ~ "PanelEffects"),
+                
+                StudyDesign = case_when( study_design  %in% c("Control-treatment") ~ "Control-treatment",
+                                         study_design  %in% c("Difference in Difference") ~ "DID",
+                                         study_design  %in% c("Pre-test/ post-test", "Pre-test/post-test") ~ "PrePost"),
+                
+                # creates a binary Control variable indicating whether a control group is present based on the control_sample_size.
+                Control = if_else(control_sample_size>0, 1, 
+                                  if_else(is.na(control_sample_size), 0, 0),0),
+                
+                BaselineConsumption = `baselineConsumption`, 
+                InterventionDuration = interventionDuration,
+                
+                Randomisation = case_when(`Randomisation method`  %in% c("no", "No", "none", "None", "not done","Not randoized", "not randomized", "Not randomized", 
+                                                                         "Not randomized, lower socio economic status population") ~ "No",
+                                          # `Randomisation method`  %in% c(NA, "No details") ~ "NA",
+                                          TRUE ~ "Yes"),  
+                # Were households first selected and then allowed to opt out of the intervention or were the households required to opt-in to the intervention or neither
+    
+                
+                After2000 = case_when(`document PY` > 2000 ~ "After",
+                                      TRUE ~ "Before"),
+                
+                StudyYear = `document PY`,
+                
+                Followup = case_when(interventionFollowup>0 ~ 1,
+                                     interventionFollowup == NA ~ 0, 
+                                     TRUE ~ 0),
+                
+                Geographic_Scope = ifelse(geographic_scope %in% c("Country", "State", "City", "Municipality", "Smaller than municipality"), "Macro", "Minor")
+                
+)
+
+# sets and reorders the factor levels for StudyDesign, StatsMethod, and Region.
+dfinc$StudyDesign <- factor(dfinc$StudyDesign, levels = c("DID", "Control-treatment", "PrePost"))
+dfinc$StudyDesign <- relevel(dfinc$StudyDesign, ref =  "PrePost")
+
+dfinc$StatsMethod <- as.factor(dfinc$StatsMethod)
+dfinc$StatsMethod <- factor(dfinc$StatsMethod, levels = c("MeansDifferences", "OLS", "PanelEffects"))
+dfinc$StatsMethod <- relevel(dfinc$StatsMethod, ref = "OLS")
+
+dfinc$Region <- as.factor(dfinc$Region)
+dfinc$Region <- factor(dfinc$Region, levels = c("Asia", "United States", "United Kingdom","Europe excl. UK", "Others"))
+dfinc$Region <- relevel(dfinc$Region, ref = "United States")
+
+dfinc$InterventionID <- 1:nrow(dfinc)
+
+```
+
+```{r}
+library(openxlsx)
+dfinc$Authors <- gsub("<br>", "", dfinc$Authors)
+
+unique_combinations <- unique(dfinc[, c("Authors", "document PY")])
+
+print(unique_combinations)
+write.xlsx(unique_combinations, "combined_included_2025.xlsx")
+```
+
+```{r}
+# save data in R database before outlier exlusion
+save(dfinc,file="lsr_data_2025.R")
+```
+
+```{r 24. write summary statistics}
+# factor variables
+sumVarsFactor <- c(#"intervention",
+                   "Opt_in_out",
+                   "StatsMethod",
+                   "StudyDesign",
+                   "Randomisation",
+                   "Region",
+                   "Weather",
+                   "cat_criterion1",
+                   "cat_criterion2",
+                   "cat_criterion5",
+                   "cat_criterion6",
+                   "cat_criterion7")
+
+# numeric variables
+sumvarsNum <- c("smd",
+                "var_smd")
+
+dfinc[sumVarsFactor] <- lapply(dfinc[sumVarsFactor], factor)
+dfinc[sumvarsNum] <- lapply(dfinc[sumvarsNum], as.numeric)
+
+# for(col in names(select(dfinc,all_of(sumVarsFactor)))) {
+#   freq_table <- freq(dfinc[[col]], style = "rmarkdown", cumul=FALSE, report.nas = FALSE, totals = FALSE)
+#   print(freq_table)
+# }
+
+dfinc %>%
+  select(all_of(c(sumVarsFactor,sumvarsNum))) %>% 
+  dfSummary(graph.col = T, style = "grid", na.col = FALSE) %>%
+  print(file = "summarystatistics_all.html")
+ rmarkdown::render("summarystatistics_all.html", output_file = "summarystatistics_all.doc")
+```

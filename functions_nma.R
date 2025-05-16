@@ -86,7 +86,8 @@ mapping_vector <- c(
   "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
   "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
   "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
-  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing"
+  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing",
+  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Motivation_Monetary"
 )
 
 mapping_vector_audit <- c(
@@ -180,13 +181,15 @@ mapping_vector_audit_rw <- c(
   "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing",
   "Feedback0:Information1:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Audit_DynamicPricing",
   "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Audit_DynamicPricing",
-  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing"
+  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
+  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Motivation_Monetary"
 )
 
 # Network Meta Analysis Function
 network_meta_analysis <- function(df, adapt=10000, iter=100000, thin=10) {
   # dev.new(width=10, height=6)
   # Create the network meta-analysis model
+  df <- df[complete.cases(df[, c("study", "treatment")]), ]
   network <- mtc.network(data.re = df)
   
   # Summarize and plot the network
