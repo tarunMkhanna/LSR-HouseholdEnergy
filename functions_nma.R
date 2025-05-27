@@ -28,66 +28,35 @@ sucra = function(x, lower.is.better = FALSE) {
 # Intervention Mapping
 mapping_vector <- c(
   "Control" = "Control",
-  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
-  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
-  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
-  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
-  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
-  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
-  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
-  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
-  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
-  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
-  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
-  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
-  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
-  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
-  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
+  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryIncentives0" = "Information",
+  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryIncentives0" = "Information_Social",
+  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryIncentives0" = "None",
+  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryIncentives1" = "Monetary",
+  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryIncentives0" = "Information_Social_Motivation", 
+  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryIncentives0" = "Information_Motivation",
+  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryIncentives0" = "Social",
+  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryIncentives1" = "Information_Monetary", 
+  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryIncentives0" = "Motivation", 
+  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryIncentives1" = "Information_Social_Monetary", 
+  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryIncentives0" = "Social_Motivation",
+  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryIncentives1" = "Social_Monetary",
+  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryIncentives1" = "Motivation_Monetary",
+  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryIncentives1" = "Social_Motivation_Monetary",
+  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryIncentives1" = "Information_Social_Motivation_Monetary",
   
-  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
-  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
-  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
-  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
-  "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
-  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
-  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
-  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
-  "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
-  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
-  "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
-  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
-  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
-  
-  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
-  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
-  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
-  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
-  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
-  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
-  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
-  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
-  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
-  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
-  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
-  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
-  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
-  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
-  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
-  
-  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
-  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
-  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
-  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
-  "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
-  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
-  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
-  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
-  "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
-  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
-  "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
-  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
-  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing",
-  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Motivation_Monetary"
+  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryIncentives0" = "Feedback_Information",
+  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryIncentives0" = "Feedback_Information_Social",
+  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryIncentives0" = "Feedback",
+  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryIncentives1" = "Feedback_Monetary",
+  "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryIncentives0" = "Feedback_Information_Social_Motivation", 
+  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryIncentives0" = "Feedback_Information_Motivation",
+  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryIncentives0" = "Feedback_Social",
+  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryIncentives1" = "Feedback_Information_Monetary", 
+  "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryIncentives0" = "Feedback_Motivation", 
+  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryIncentives1" = "Feedback_Information_Social_Monetary", 
+  "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryIncentives0" = "Feedback_Social_Motivation",
+  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryIncentives1" = "Feedback_Social_Monetary",
+  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryIncentives1" = "Feedback_Information_Motivation_Monetary"
 )
 
 mapping_vector_audit <- c(
@@ -122,80 +91,16 @@ mapping_vector_audit <- c(
   "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryIncentives1" = "Social_Motivation_Monetary"
 )
 
-mapping_vector_audit_rw <- c(
-  "Control" = "Control",
-  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
-  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
-  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
-  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
-  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
-  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
-  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
-  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
-  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
-  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
-  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
-  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation",
-  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
-  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation",
-  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
-  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
-  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation",
-  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation",
-  "Feedback0:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Audit",
-  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary",
-  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
-  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary",
-  "Feedback0:Information1:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Audit",
-  "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Audit",
-  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
-  
-  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
-  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
-  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
-  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
-  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
-  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
-  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
-  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
-  "Feedback1:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
-  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
-  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing",
-  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
-  "Feedback0:Information0:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing",
-  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
-  "Feedback1:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
-  "Feedback0:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing",
-  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing",
-  "Feedback0:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Audit_DynamicPricing",
-  "Feedback1:Information1:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing",
-  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
-  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing",
-  "Feedback1:Information1:HomeAudit0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing",
-  "Feedback0:Information1:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Audit_DynamicPricing",
-  "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Audit_DynamicPricing",
-  "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
-  "Feedback0:Information1:HomeAudit0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Motivation_Monetary"
-)
-
 # Network Meta Analysis Function
 network_meta_analysis <- function(df, adapt=10000, iter=100000, thin=10) {
   # dev.new(width=10, height=6)
   # Create the network meta-analysis model
-  df <- df[complete.cases(df[, c("study", "treatment")]), ]
   network <- mtc.network(data.re = df)
   
   # Summarize and plot the network
   print(summary(network))
-  x11()
-  plot(network, dynamic.edge.width=TRUE, use.description=FALSE)
+  # x11()
+  plot(network)
   
   # Set up the model
   model <- mtc.model(
@@ -212,9 +117,10 @@ network_meta_analysis <- function(df, adapt=10000, iter=100000, thin=10) {
     n.iter = iter,
     thin = thin
   )
+  print(summary(mc_results))
   
   # Check convergence using Gelman-Rubin diagnostic
-  x11()
+  # x11()
   gelman.plot(mc_results)
   print(gelman.diag(mc_results)$mpsrf)
   
@@ -230,11 +136,10 @@ network_meta_analysis <- function(df, adapt=10000, iter=100000, thin=10) {
   
   # Generate ranking probabilities, forest plots, and relative effect league table
   rank_all <- rank.probability(mc_results, preferredDirection = 1)
-  x11()
+  # x11()
   plot(rank_all, beside = TRUE, cex.names = 0.5)
-  x11()
+  # x11()
   forest(relative.effect(mc_results, t1 = "Control"))
-  x11()
   league_tbl <- relative.effect.table(mc_results)
   # dev.off()
   
@@ -248,7 +153,7 @@ network_meta_analysis <- function(df, adapt=10000, iter=100000, thin=10) {
   
   sucra_df$Treatment <- factor(sucra_df$Treatment, levels = sucra_df$Treatment)
   
-  x11()
+  # x11()
   p<-ggplot(data = sucra_df, aes(x = Treatment, y = SUCRA)) +
     geom_point() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
@@ -301,8 +206,8 @@ network_meta_regression <- function(dataset, df, variable_name) {
   dic_value <- summary_output$DIC['DIC']
   
   # Forest plots for covariate = 1 and 0
-  forest(relative.effect(mcr, t1 = "Control", covariate = 1))
-  forest(relative.effect(mcr, t1 = "Control", covariate = 0))
+  # forest(relative.effect(mcr, t1 = "Control", covariate = 1))
+  # forest(relative.effect(mcr, t1 = "Control", covariate = 0))
   
   # Return DIC and summary
   return(data.frame(Variable = variable_name, DIC = dic_value))
