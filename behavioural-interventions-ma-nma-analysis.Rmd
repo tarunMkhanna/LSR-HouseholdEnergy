@@ -612,10 +612,52 @@ df_mc_all <- df_meta_all %>%
   select(-c(study, StudyDesign, Region, Opt_in_out, StatsMethod, Randomisation, Medium, Geographic_Scope)) %>%
   rename(study = study_indp)
 
+# --- New section: Inconsistency assessment (Q) ---
+
+df_pw <- df_mc_all %>%
+  mutate(seTE = sqrt(std.err),          # var → se
+         treat1 = "Control",            # reference
+         treat2 = treatment) %>%
+  filter(treat2 != "Control") %>%
+  select(study, treat1, treat2, TE = diff, seTE)
+
+# Turn into the netmeta “pairwise” object:
+pw <- pairwise(
+  treat = list(treat1, treat2),
+  TE    = list(TE, TE),     # difference on the same scale
+  seTE  = list(seTE, seTE),
+  studlab = study,
+  data  = df_pw,
+  sm    = "SMD"
+)
+
+# Run the random-effects network meta
+net1 <- netmeta(
+  TE      = TE,
+  seTE    = seTE,
+  treat1  = treat1,
+  treat2  = treat2,
+  studlab = studlab,
+  data    = pw,
+  sm      = "SMD",
+  random  = TRUE
+)
+
+# Check global inconsistency (design-by-treatment interaction)
+decomp <- decomp.design(net1)
+decomp$Q.decomp
+
+# ===============================================================
+
 # Run NMA
 nma_result <- network_meta_analysis(df_mc_all)
 #forest(relative.effect(mc_results, t1 = "Control"))
+
+# --- New section: Convergence diagnostics  ---
+nma_result$Gelman_Rubin_Diagnostics
+# =================================================
 ```
+
 
 ```{r calculate p-values for NMA results}
 nma_result$Summary_Results <- nma_result$Summary_Results %>%
