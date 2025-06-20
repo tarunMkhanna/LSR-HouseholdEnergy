@@ -5,11 +5,11 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-```{r 0. setup, include=FALSE}
+```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r 1. load libraries}
+```{r load libraries}
 library(dplyr)
 library(ggplot2)
 library(texreg)
@@ -35,15 +35,15 @@ library(shiny)
 library(readxl)
 ```
 
-```{r 2. set working directory and load functions}
+```{r set working directory and load functions}
 # setwd("your working directory")
 source("functions_v1.R")
 source("functions_nma.R")
 ```
 
 # only perform this if you have converted coefficients to smds and have mising data
-```{r 3. (opt.) complete data where possible and assign for manual completion otherwise}
-dfinc <- read_excel("C:/Users/dand/Downloads/Living_Review_Full_Text_Coding_Aditya.xlsx")
+```{r (opt.) complete data where possible and assign for manual completion otherwise}
+dfinc <- read_excel("C:/Users/dand/Desktop/5-data-analysis/Living_Review_Full_Text_Coding_Aditya (1).xlsx")
 
 dfinc <- dfinc %>%
   filter(! is.na(Authors))
@@ -60,8 +60,10 @@ num_cols <- c("test_statistic","coefficient", "coefficient_sd","total_sample_siz
 dfinc[num_cols] <- lapply(dfinc[num_cols], as.numeric)
 
 # record unique studies
-unique_studies <- dfinc %>%
-  distinct("documentID", Authors)
+unique_studies <- dfinc_all %>%
+  distinct(documentID, Authors, `document title`, country)
+
+table(unique_studies$country)
 
 summary(dfinc$test_statistic)
 
@@ -82,9 +84,9 @@ dfinc$df <- NULL
 dfinc$alpha <- NULL
 ```
 
-```{r 4. load and pre-process data}
+```{r load and pre-process data}
 # SPECIFY INPUT FILE HERE
-# dfinc <- readxl::read_xlsx("C:/Users/dand/Downloads/Living_Review_Full_Text_Coding_Aditya.xlsx")
+dfinc <- readxl::read_xlsx("filepath")
 
 # process effect size variables 
 dfinc$effect_direction <- ifelse(dfinc$effect_direction == "decrease", -1, 
@@ -92,6 +94,10 @@ dfinc$effect_direction <- ifelse(dfinc$effect_direction == "decrease", -1,
 
 dfinc$PercentageChange <- abs(as.numeric(dfinc$PercentageChange))
 dfinc$test_statistic <- abs(as.numeric(dfinc$test_statistic))
+dfinc$coefficient_sd <- abs(as.numeric(dfinc$coefficient_sd))
+dfinc$coefficient <- abs(as.numeric(dfinc$coefficient))
+dfinc$diff_mean <- abs(as.numeric(dfinc$diff_mean))
+
 dfinc$study_design <- ifelse(dfinc$study_design == "Pre-test/ post-test", "Pre-test/post-test", dfinc$study_design)
 dfinc$significance_test <- ifelse(dfinc$significance_test == "f-test", "F-test", dfinc$significance_test)
 
@@ -109,7 +115,7 @@ dfinc <- dfinc %>%
 
 ```
 
-```{r 4(b). process risk of bias data for completeness}
+```{r check risk of bias data for completeness}
 rob_variables <- c(
   "DataCausal", "ConfounderPossibility", "ConfounderAll", "ConfounderJustifiedOmission",
   "ConfounderAccuracy", "ConfounderAnalysis", "SampleExchangeability", "SampleExclusion",
@@ -131,7 +137,7 @@ for (var in rob_variables) {
 }
 ```
 
-```{r 5. process risk of bias (critical appraisal) variables}
+```{r process risk of bias variables}
 # criterion 1: risk of confounding biases
 dfinc <- dfinc %>%
   mutate(across(c(ConfounderPossibility, ConfounderAll, ConfounderJustifiedOmission, ConfounderAccuracy, ConfounderAnalysis), as.factor))
@@ -201,7 +207,15 @@ dfinc$cat_criterion7 <- ifelse((dfinc$StatsRecording == "No" | dfinc$StatsRecord
 table(dfinc$cat_criterion7)
 ```
 
-```{r 6. summarise risk of bias values in 1 variable}
+```{r print risk of bias % studies per criterion}
+round(prop.table(table(dfinc_all$cat_criterion1)) * 100, 1)
+round(prop.table(table(dfinc_all$cat_criterion2)) * 100, 1)
+round(prop.table(table(dfinc_all$cat_criterion5)) * 100, 1)
+round(prop.table(table(dfinc_all$cat_criterion6)) * 100, 1)
+round(prop.table(table(dfinc_all$cat_criterion7)) * 100, 1)
+```
+
+```{r summarise risk of bias values in 1 variable}
 dfinc <- dfinc %>%
   mutate(across(c(cat_criterion1, cat_criterion2, cat_criterion5, cat_criterion6, cat_criterion7),
                 ~ case_when(
@@ -221,7 +235,7 @@ dfinc <- mutate(dfinc,
 table(dfinc$cat_criteria_sum)
 ```
 
-```{r 7. (opt.) exclude outliers or any other categories of observations}
+```{r (opt.) exclude outliers or any other categories of observations}
 # when running the analysis for the first time, skip this and come back after chunk #17 on 'identify outliers using cook's d'
 # exclude outliers as identified based on cook's d and by looking at them (we exclude CPP and PLP later, which excludes 1 outlier)
 
@@ -237,7 +251,7 @@ dfinc <- dfinc %>% filter(dfinc$`Critical Peak Pricing` == 0 | is.na(dfinc$'Crit
 dfinc <- dfinc %>% filter(dfinc$`Peak Load Pricing` == 0 | is.na(dfinc$'Peak Load Pricing'))
 ```
 
-```{r 8. calculate smd and smd var}
+```{r calculate smd and smd var}
 # CALCULATING STANDARDIZED SIZES AND VARIANCES
 
 # formulas taken from Ringquist
@@ -325,7 +339,7 @@ print(paste0(nrow(dfinc), " data can be used after all"))
 summary(dfinc$smd)
 ```
 
-```{r 9. clean data and introduce controls}
+```{r clean data and introduce controls}
 # DATA CLEANING AND CONTROLS
 dfinc$study_design <- as.factor(dfinc$study_design)
 
@@ -371,6 +385,7 @@ dfinc <- mutate(dfinc,
                   country %in% c("Taiwan") ~ 'Asia',
                   country %in% c("Thailand") ~ 'Asia',
                   country %in% c("Vietnam") ~ 'Asia',
+                  country %in% c("Indonesia") ~ 'Asia',
                   
                   country %in% c("Austria") ~ 'Europe excl. UK',
                   country %in% c("Denmark") ~ 'Europe excl. UK',
@@ -395,19 +410,19 @@ dfinc <- mutate(dfinc,
                   country %in% c("Romania") ~ 'Europe excl. UK',
                   
                   country %in% c("Australia") ~ 'Others',
-                  country %in% c("Colombia") ~ 'Others',
-                  country %in% c("Ecuador") ~ 'Others',
+                  country %in% c("Colombia") ~ 'South America',
+                  country %in% c("Ecuador") ~ 'South America',
                   country %in% c("Israel") ~ 'Others',
                   country %in% c("South Africa") ~ 'Others',
-                  country %in% c("Canada") ~ 'Others',
-                  country %in% c("Mexico") ~ 'Others',
+                  country %in% c("Canada") ~ 'North America',
+                  country %in% c("Mexico") ~ 'Central America',
                   country %in% c("Iran") ~ 'Others',
-                  country %in% c("Chile") ~ 'Others',
-                  country %in% c("Brasil", "Brazil") ~ 'Others',
+                  country %in% c("Chile") ~ 'South America',
+                  country %in% c("Brasil", "Brazil") ~ 'South America',
                   country %in% c("Ghana") ~ 'Others',
                   
                   country %in% c("United Kingdom", "England") ~ 'United Kingdom',
-                  country %in% c("United States") ~ 'United States',
+                  country %in% c("United States") ~ 'North America',
                   
                   TRUE ~ country),
                 
@@ -419,7 +434,7 @@ dfinc <- mutate(dfinc,
                 
                 StudyDesign = case_when( study_design  %in% c("Control-treatment") ~ "Control-treatment",
                                          study_design  %in% c("Difference in Difference") ~ "DID",
-                                         study_design  %in% c("Pre-test/ post-test", "Pre-test/post-test") ~ "PrePost"),
+                                         study_design  %in% c("Pre-test/ post-test", "Pre-test/post-test", "Pre-test / post-test") ~ "PrePost"),
                 
                 # creates a binary Control variable indicating whether a control group is present based on the control_sample_size.
                 Control = if_else(control_sample_size>0, 1, 
@@ -448,6 +463,10 @@ dfinc <- mutate(dfinc,
                 
 )
 
+# assume no controls if coded NA
+dfinc$Weather <- ifelse(is.na(dfinc$Weather),"0",dfinc$Weather) 
+dfinc$StudyDesign <- ifelse(grepl("23-168", dfinc$effectID), "PrePost", dfinc$StudyDesign)
+
 # sets and reorders the factor levels for StudyDesign, StatsMethod, and Region.
 dfinc$StudyDesign <- factor(dfinc$StudyDesign, levels = c("DID", "Control-treatment", "PrePost"))
 dfinc$StudyDesign <- relevel(dfinc$StudyDesign, ref =  "PrePost")
@@ -456,30 +475,62 @@ dfinc$StatsMethod <- as.factor(dfinc$StatsMethod)
 dfinc$StatsMethod <- factor(dfinc$StatsMethod, levels = c("MeansDifferences", "OLS", "PanelEffects"))
 dfinc$StatsMethod <- relevel(dfinc$StatsMethod, ref = "OLS")
 
+dfinc$Region <- as.character(dfinc$Region)
+dfinc$Region <- ifelse(dfinc$Region == "United States", "North America", dfinc$Region)
 dfinc$Region <- as.factor(dfinc$Region)
-dfinc$Region <- factor(dfinc$Region, levels = c("Asia", "United States", "United Kingdom","Europe excl. UK", "Others"))
-dfinc$Region <- relevel(dfinc$Region, ref = "United States")
+dfinc$Region <- factor(dfinc$Region, levels = c("Asia", "North America", "United Kingdom","Europe excl. UK", "Others"))
+dfinc$Region <- relevel(dfinc$Region, ref = "North America")
 
 dfinc$InterventionID <- 1:nrow(dfinc)
 
 ```
 
-```{r}
+```{r create a table of included studies}
 library(openxlsx)
 dfinc$Authors <- gsub("<br>", "", dfinc$Authors)
 
-unique_combinations <- unique(dfinc[, c("Authors", "document PY")])
+unique_combinations <- unique(dfinc_all[, c("documentID", "Authors", "document PY")])
 
-print(unique_combinations)
-write.xlsx(unique_combinations, "combined_included_2025.xlsx")
+# unique_combinations <- unique(dfinc_all[, c("documentID", "Authors", "document PY", "country","total_sample_size")])
+
+# print(mean(unique_combinations$total_sample_size))
+
+# first_per_doc <- unique_combinations[!duplicated(unique_combinations$documentID), ]
+# sum(first_per_doc$total_sample_size, na.rm = TRUE)
+
+write.xlsx(unique_combinations, "combined_included_2025-06-18.xlsx")
 ```
 
-```{r}
+```{r attach newer data to older data and deduplicate}
+dfinc_new <- dfinc
+load("lsr_data.R")
+dfinc <- dfinc[!duplicated(dfinc[, c("Authors", "smd", "var_smd", "effectID")]), ]
+n0 <- nrow(dfinc)
+
+dfinc <- dfinc %>%
+  filter(!grepl("Dertwinkel-Kalt", Authors)) %>%
+  filter(!grepl("Xing Menglin", Authors)) %>%
+  filter(!grepl("Sudarmaji", Authors)) 
+# are these studies now in the sample?
+
+dfinc <- unique(rbind(dfinc, dfinc_new))
+
+#dfinc_dedup <- dfinc[!duplicated(dfinc$effectID), ]
+# resolve the issue of multiple data points existing with the same effectID
+
+dfinc <- dfinc[!duplicated(dfinc[, c("Authors", "smd", "var_smd", "effectID")]), ]
+
+n1 <- nrow(dfinc)
+
+cat("New data points added:", n1 - n0, "\n")
+```
+
+```{r save data in R database}
 # save data in R database before outlier exlusion
-save(dfinc,file="lsr_data_2025.R")
+save(dfinc,file = paste0("lsr_data_", today, ".R"))
 ```
 
-```{r 24. write summary statistics}
+```{r write summary statistics}
 # factor variables
 sumVarsFactor <- c(#"intervention",
                    "Opt_in_out",
@@ -494,9 +545,14 @@ sumVarsFactor <- c(#"intervention",
                    "cat_criterion6",
                    "cat_criterion7")
 
+# one older study is missing RoB variables as we are unable to retrieve the full text anymore
+
+dfinc$cohen_d <- dfinc$smd
+dfinc$d_var <- dfinc$var_smd
+
 # numeric variables
-sumvarsNum <- c("smd",
-                "var_smd")
+sumvarsNum <- c("cohen_d",
+                "d_var")
 
 dfinc[sumVarsFactor] <- lapply(dfinc[sumVarsFactor], factor)
 dfinc[sumvarsNum] <- lapply(dfinc[sumvarsNum], as.numeric)
@@ -506,9 +562,130 @@ dfinc[sumvarsNum] <- lapply(dfinc[sumvarsNum], as.numeric)
 #   print(freq_table)
 # }
 
+today <- Sys.Date()
+docfile <- paste0("summarystatistics_all_", today, ".doc")
+htmlfile <- paste0("summarystatistics_all_", today, ".html")
+
 dfinc %>%
   select(all_of(c(sumVarsFactor,sumvarsNum))) %>% 
   dfSummary(graph.col = T, style = "grid", na.col = FALSE) %>%
-  print(file = "summarystatistics_all.html")
- rmarkdown::render("summarystatistics_all.html", output_file = "summarystatistics_all.doc")
+  print(file = htmlfile)
+ rmarkdown::render(htmlfile, output_file = docfile)
+```
+
+```{r process intervention variables}
+# ANALYSIS USING 5 MAIN CATEGORIES MAPPING - FEEDBACK, INFORMATION, SOCIAL, MOTIVATION, MONETARY
+
+# Prepare data for analysis
+dfinc_all <- dfinc %>%
+  mutate(
+    Feedback = ifelse(`Historical` == 1  | `Home Energy Report` == 1 | `In home display` == 1 | `Smart Metering` == 1, 1, 0),
+    Information = ifelse(`Awareness Campaign` == 1 | `Bills` == 1 |`Home audits` == 1 | `tips` == 1, 1, 0),
+    SocialComparison = ifelse(`Injunctive Norm / Social Norm` == 1 | `peer comparison` == 1, 1, 0),
+    Motivation = ifelse(`Commitment strategies` == 1 | `Competition` == 1 | `Gamification` == 1 | `Goal Setting` == 1 | `Moral suasion` == 1, 1, 0),
+    # DynamicPricing = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1,  1, 0),
+    MonetaryRewards = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | 
+                               `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1 |`Rewards` == 1, 1, 0)
+  ) %>% 
+  replace_na(list(
+    Feedback = 0,
+    Information = 0,
+    SocialComparison = 0,
+    Motivation = 0,
+    MonetaryRewards = 0#,
+    #DynamicPricing = 0
+  )) %>%
+  mutate(Feedback_2 = ifelse(Feedback == 1, "Feedback1", "Feedback0")) %>% 
+  mutate(Information_2 = ifelse(Information == 1, "Information1", "Information0")) %>% 
+  mutate(SocialComparison_2 = ifelse(SocialComparison == 1, "SocialComparison1", "SocialComparison0")) %>% 
+  mutate(Motivation_2 = ifelse(Motivation == 1, "Motivation1", "Motivation0")) %>% 
+  mutate(MonetaryRewards_2 = ifelse(MonetaryRewards == 1, "MonetaryRewards1", "MonetaryRewards0")) %>%
+  #mutate(DynamicPricing_2 = ifelse(DynamicPricing == 1, "DynamicPricing1", "DynamicPricing0")) %>%
+  mutate(Treatment1 = paste(Feedback_2, Information_2, SocialComparison_2, Motivation_2, MonetaryRewards_2, sep = ":")) %>%
+  filter(Treatment1 != "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0") %>% # Exclude effect size that doesn't get mapped to a valid intervention
+  mutate(treatment = mapping_vector[Treatment1])
+
+dfinc_all <- dfinc_all %>%
+  mutate(intervention = apply(select(., Feedback, Information, SocialComparison, Motivation, MonetaryRewards), 1, function(row) {
+    cols <- names(row)[which(row == 1)]   # get names of columns where the value is 1
+    if(length(cols) > 0) {
+      paste(cols, collapse = "_")         # concatenate with underscore
+    } else {
+      NA                                  # if no values are 1, set to NA
+    }
+  }))
+
+dfinc_all$InterventionID <- 1:nrow(dfinc_all)
+
+dfinc_all$Feedback <- factor(dfinc_all$Feedback)
+dfinc_all$Information <- factor(dfinc_all$Information)
+dfinc_all$SocialComparison <- factor(dfinc_all$SocialComparison)
+dfinc_all$Motivation <- factor(dfinc_all$Motivation)
+dfinc_all$MonetaryRewards <- factor(dfinc_all$MonetaryRewards)
+# dfinc_all$DynamicPricing <- factor(dfinc_all$DynamicPricing)
+
+# use this for showing n observations per intervention
+int_count <- table(dfinc_all$intervention)
+print(int_count <- table(dfinc_all$intervention))
+```
+
+```{r write summary statistics per intervention}
+dfinc4 <- dfinc_all %>% filter(dfinc_all$intervention %in% c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards")) 
+
+# add audit as a separate category if desirable
+
+# write summary statistics for all different intervention categories
+# dfinc4 <- dfinc
+
+dfinc4[sumVarsFactor] <- lapply(dfinc4[sumVarsFactor], factor)
+dfinc4[sumvarsNum] <- lapply(dfinc4[sumvarsNum], as.numeric)
+
+dfinc4$cohen_d <- dfinc4$smd # rename as we're using calculation for cohen's d rather than smd
+dfinc4$d_var <- dfinc4$var_smd
+
+# list of interventions
+unique_interventions <- unique(dfinc4$intervention)
+
+# Create an empty list to store the summary tables for each intervention
+summary_list <- list()
+
+# Loop through each intervention and create the summary
+for (interv in unique_interventions) {
+  # Filter the data for the specific intervention
+  df_interv <- dfinc4 %>% filter(intervention == interv)
+  
+  # Create the summary statistics for the filtered data
+  summary <- df_interv %>%
+    select(all_of(c(sumVarsFactor, sumvarsNum))) %>% 
+    dfSummary(graph.col = FALSE, style = "grid", na.col = FALSE)
+  
+  # Add the summary table to the list, with the name of the intervention as the title
+  summary_list[[interv]] <- summary
+}
+
+# Combine all summaries into a single data frame, with an extra column for the intervention
+combined_summary <- bind_rows(
+  lapply(names(summary_list), function(interv) {
+    summary_data <- summary_list[[interv]]
+    summary_data <- as.data.frame(summary_data)
+    summary_data$Intervention <- interv
+    return(summary_data)
+  })
+)
+
+today <- Sys.Date()
+htmlfile <- paste0("summarystatistics_combined-",today,".html")
+docfile <- paste0("summarystatistics_combined-",today,".doc")
+
+# Save the combined summary as a single HTML file
+combined_summary %>%
+  kable("html", escape = FALSE, caption = "Summary Statistics by Intervention") %>%
+  kable_styling(full_width = TRUE) %>%
+  save_kable(htmlfile)
+
+# Convert the HTML to a DOC file using rmarkdown
+rmarkdown::render(
+  input = htmlfile,
+  output_file = docfile
+)
 ```

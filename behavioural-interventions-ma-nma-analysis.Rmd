@@ -37,6 +37,7 @@ library(haven)
 library(stringr)
 library(shiny)
 library(readxl)
+library(stringr)
 ```
 
 ```{r set working directory and load functions}
@@ -45,34 +46,7 @@ source("functions_nma.R")
 ```
 
 ```{r load data}
-load("lsr_data_2025-20250513.R")
-# load("lsr_data_2024-11042025.R")
-# dfinc$`document ID`<- NULL
-# df_all <- dfinc
-# load("lsr_data_2025.R")
-# 
-# safe_bind_rows <- function(df1, df2) {
-#   common_cols <- intersect(names(df1), names(df2))
-# 
-#   for (col in common_cols) {
-#     type1 <- class(df1[[col]])[1]
-#     type2 <- class(df2[[col]])[1]
-# 
-#     if (type1 != type2) {
-#       
-#       # coerce both to character if types mismatch
-#       df1[[col]] <- as.character(df1[[col]])
-#       df2[[col]] <- as.character(df2[[col]])
-#     }
-#   }
-# 
-#   dplyr::bind_rows(df1, df2)
-# }
-# 
-# dfinc <- safe_bind_rows(df_all,dfinc)
-# 
-# # save data in R database before outlier exlusion
-# save(dfinc,file="lsr_data_2025-20250513.R")
+load("lsr_data_2025-06-13.R")
 ```
 
 ```{r OPTIONAL exclude outliers or any other categories of observations}
@@ -92,7 +66,7 @@ dfinc <- dfinc %>% filter(dfinc$`Peak Load Pricing` == 0 | is.na(dfinc$'Peak Loa
 ```
 
 ```{r process intervention variables}
-# ANALYSIS USING 6 MAIN CATEGORIES MAPPING - FEEDBACK, INFORMATION, SOCIAL, MOTIVATION, MONETARY, DYNAMICPRICING
+# ANALYSIS USING 5 MAIN CATEGORIES MAPPING - FEEDBACK, INFORMATION, SOCIAL, MOTIVATION, MONETARY
 
 # Prepare data for analysis
 dfinc_all <- dfinc %>%
@@ -101,29 +75,30 @@ dfinc_all <- dfinc %>%
     Information = ifelse(`Awareness Campaign` == 1 | `Bills` == 1 |`Home audits` == 1 | `tips` == 1, 1, 0),
     SocialComparison = ifelse(`Injunctive Norm / Social Norm` == 1 | `peer comparison` == 1, 1, 0),
     Motivation = ifelse(`Commitment strategies` == 1 | `Competition` == 1 | `Gamification` == 1 | `Goal Setting` == 1 | `Moral suasion` == 1, 1, 0),
-    DynamicPricing = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1,  1, 0),
-    MonetaryRewards = ifelse(`Rewards` == 1, 1, 0)
+    # DynamicPricing = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1,  1, 0),
+    MonetaryRewards = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | 
+                               `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1 |`Rewards` == 1, 1, 0)
   ) %>% 
   replace_na(list(
     Feedback = 0,
     Information = 0,
     SocialComparison = 0,
     Motivation = 0,
-    MonetaryRewards = 0,
-    DynamicPricing = 0
+    MonetaryRewards = 0#,
+    #DynamicPricing = 0
   )) %>%
   mutate(Feedback_2 = ifelse(Feedback == 1, "Feedback1", "Feedback0")) %>% 
   mutate(Information_2 = ifelse(Information == 1, "Information1", "Information0")) %>% 
   mutate(SocialComparison_2 = ifelse(SocialComparison == 1, "SocialComparison1", "SocialComparison0")) %>% 
   mutate(Motivation_2 = ifelse(Motivation == 1, "Motivation1", "Motivation0")) %>% 
   mutate(MonetaryRewards_2 = ifelse(MonetaryRewards == 1, "MonetaryRewards1", "MonetaryRewards0")) %>%
-  mutate(DynamicPricing_2 = ifelse(DynamicPricing == 1, "DynamicPricing1", "DynamicPricing0")) %>%
-  mutate(Treatment1 = paste(Feedback_2, Information_2, SocialComparison_2, Motivation_2, MonetaryRewards_2, DynamicPricing_2, sep = ":")) %>%
-  filter(Treatment1 != "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0") %>% # Exclude effect size that doesn't get mapped to a valid intervention
+  #mutate(DynamicPricing_2 = ifelse(DynamicPricing == 1, "DynamicPricing1", "DynamicPricing0")) %>%
+  mutate(Treatment1 = paste(Feedback_2, Information_2, SocialComparison_2, Motivation_2, MonetaryRewards_2, sep = ":")) %>%
+  filter(Treatment1 != "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0") %>% # Exclude effect size that doesn't get mapped to a valid intervention
   mutate(treatment = mapping_vector[Treatment1])
 
 dfinc_all <- dfinc_all %>%
-  mutate(intervention = apply(select(., Feedback, Information, SocialComparison, Motivation, MonetaryRewards, DynamicPricing), 1, function(row) {
+  mutate(intervention = apply(select(., Feedback, Information, SocialComparison, Motivation, MonetaryRewards), 1, function(row) {
     cols <- names(row)[which(row == 1)]   # get names of columns where the value is 1
     if(length(cols) > 0) {
       paste(cols, collapse = "_")         # concatenate with underscore
@@ -139,7 +114,7 @@ dfinc_all$Information <- factor(dfinc_all$Information)
 dfinc_all$SocialComparison <- factor(dfinc_all$SocialComparison)
 dfinc_all$Motivation <- factor(dfinc_all$Motivation)
 dfinc_all$MonetaryRewards <- factor(dfinc_all$MonetaryRewards)
-dfinc_all$DynamicPricing <- factor(dfinc_all$DynamicPricing)
+# dfinc_all$DynamicPricing <- factor(dfinc_all$DynamicPricing)
 
 # use this for showing n observations per intervention
 int_count <- table(dfinc_all$intervention)
@@ -147,6 +122,7 @@ print(int_count <- table(dfinc_all$intervention))
 ```
 
 ```{r create study overview table}
+library(flextable)
 dfinc_unique <- dfinc_all %>%
   distinct(Authors, `document PY`, `document title`, statistical_technique, study_design, dependent_variable, country, randomisation_dummy, Opt_in_out, intervention, control)
 
@@ -157,8 +133,12 @@ dfinc_unique$`document PY` <- as.character(dfinc_unique$`document PY`)
 ft <- flextable(dfinc_unique)
 ft <- autofit(ft) 
 
-save_as_html(ft, path = "study_information_table-20250512.html")
-rmarkdown::render("study_information_table-20250512.html", output_file = "study_information_table-20250512.doc")
+today <- Sys.Date()
+docfile <- paste0("study_information_table_", today, ".doc")
+htmlfile <- paste0("study_information_table_", today, ".html")
+
+save_as_html(ft, path = htmlfile)
+rmarkdown::render(htmlfile, output_file = docfile)
 ```
 
 ```{r calculate average percentage change}
@@ -207,7 +187,7 @@ ggplot(dfinc_percent, aes(x = smd)) +
   labs(title = "Density Plot of Cohen's d and Scaled Percentage Change") +
   theme_minimal()
 
-ggsave("smd_percentagechange_density.png")
+ggsave("20250613-results/smd_percentagechange_density.png")
 ```
 
 ```{r OPTIONAL additional exclusion criteria}
@@ -220,18 +200,17 @@ ggsave("smd_percentagechange_density.png")
 #        x = "Total Sample Size",
 #        y = "Frequency") +
 #   theme_minimal()
-# 
-# # intervention combination with >=5 observations 
-# # execute if you want to exclude studies that has intervention types with < 5 observations
-# 
-# treat_counts <- dfinc_all %>%
-#   group_by(treatment) %>%
-#   summarise(count = n(), .groups = 'drop')
-# treats_to_remove <- treat_counts %>%
-#   filter(count < 5) %>%
-#   select(treatment, count)
-# print(treats_to_remove)
-# 
+
+# intervention combination with >=5 observations
+# execute if you want to exclude studies that has intervention types with < 5 observations
+
+treat_counts <- dfinc_all %>%
+  group_by(intervention) %>%
+  summarise(count = n(), .groups = 'drop')
+
+treats_to_remove <- treat_counts %>%
+  filter(count < 5) 
+
 # # paper with negative diff_mean
 # negative_diff_mean_ids <- dfinc_all %>%
 #   filter(diff_mean < 0) %>%
@@ -240,10 +219,10 @@ ggsave("smd_percentagechange_density.png")
 # print(negative_diff_mean_ids)
 
 # more data exclusion criteria
-#dfinc_all <- dfinc_all %>%
+dfinc_all <- dfinc_all %>%
   #filter(total_sample_size <= quantile(dfinc_all$total_sample_size, 0.97)) %>% 
   # exclude studies with top 3% sample size
-  #filter(!(treatment %in% treats_to_remove$treatment)) # %>%
+  filter(!(intervention %in% treats_to_remove$intervention)) # %>%
 # 565 observations
   # filter(! dfinc_all$'document ID' %in% negative_diff_mean_ids['document ID])
 ```
@@ -251,341 +230,107 @@ ggsave("smd_percentagechange_density.png")
 ```{r meta-analysis}
 # MA (Comparing interventions in a meta regression model and interactions)
 
-# dfinc_all <- dfinc_all %>%
-#  filter (intervention %in% c("Feedback","Information","SocialComparison","Motivation","MonetaryRewards", "DynamicPricing"))
+model_reml <- rma.mv(smd, var_smd, random = ~ 1| as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML",
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0)
+# compute I^2
+compute_I2(model_reml)
 
 EffectSizeSummary_RE <- data_frame() 
+EffectSizeSummary_RE <- rbind(EffectSizeSummary_RE, tidy3(model_reml))
+EffectSizeSummary_RE<- separate(EffectSizeSummary_RE, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards"))
 
-EffectSizeSummary_RE <- rbind(EffectSizeSummary_RE,
-                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_all, method = "REML",
-                                             
-                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
-                                             
-                                )
-                                )
-  )
-
-EffectSizeSummary_RE<- separate(EffectSizeSummary_RE, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
-
-EffectSizeSummary_RE <- mutate(EffectSizeSummary_RE,
-                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
-                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
-                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
-                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
-                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
-                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
-                               All=1
-)
-
-EffectSizeSummary_RE <- mutate(EffectSizeSummary_RE,
-                               order = case_when(rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
-                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
-                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
-                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
-                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
-                                                 rowSums(EffectSizeSummary_RE[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
-                               
-                               label = recode(model1,
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
-                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
-                                              
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
-                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
-                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
-                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
-                                              
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
-                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
-                                              
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
-                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
-                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Motivation_Monetary")
-                               
-)
-
-EffectSizeSummary_RE_f <- EffectSizeSummary_RE %>% 
-  filter (EffectSizeSummary_RE$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+EffectSizeSummary_RE <- recode_binary_predictors(EffectSizeSummary_RE)
+EffectSizeSummary_RE <- process_order_label(EffectSizeSummary_RE)
 ```
 
 ```{r meta-analysis correcting for publication bias}
 # MA (Comparing interventions in a meta regression model and interactions)
 
-# dfinc_all <- dfinc_all %>%
-#  filter (intervention %in% c("Feedback","Information","SocialComparison","Motivation","MonetaryRewards", "DynamicPricing"))
+model_remlPB <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0+var_smd)
+# calculate I^2
+compute_I2(model_remlPB)
 
 EffectSizeSummary_RE2 <- data_frame() 
-
-EffectSizeSummary_RE2 <- rbind(EffectSizeSummary_RE2,
-                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_all, method = "REML",
-                                             
-                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0+var_smd
-                                             
-                                )
-                                )
-  )
-
+EffectSizeSummary_RE2 <- rbind(EffectSizeSummary_RE2, tidy3(model_remlPB))
 EffectSizeSummary_RE2 <- separate(EffectSizeSummary_RE2, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
 
-EffectSizeSummary_RE2 <- mutate(EffectSizeSummary_RE2,
-                               Feedback = as.numeric(recode(Feedback, "Feedback1" = 1, "Feedback0" = 0)),
-                               MonetaryRewards = as.numeric(recode(MonetaryRewards, "MonetaryRewards1" = 1, "MonetaryRewards0" = 0)),
-                               DynamicPricing = as.numeric(recode(DynamicPricing, "DynamicPricing1" = 1, "DynamicPricing0" = 0)),
-                               Motivation = as.numeric(recode(Motivation, "Motivation1" = 1, "Motivation0" = 0)),
-                               Information = as.numeric(recode(Information, "Information1" = 1, "Information0" = 0)),
-                               SocialComparison = as.numeric(recode(SocialComparison, "SocialComparison1" = 1, "SocialComparison0" = 0)),
-                               All=1
-)
-
-EffectSizeSummary_RE2 <- mutate(EffectSizeSummary_RE2,
-                               order = case_when(rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==0 ~ 0,
-                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==1 ~ 1,
-                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==2 ~ 2,
-                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==3 ~ 3,
-                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==4 ~ 4,
-                                                 rowSums(EffectSizeSummary_RE2[,c( "SocialComparison","Feedback","MonetaryRewards", "Motivation", "Information","DynamicPricing" )])==5 ~ 5,),
-                               
-                               label = recode(model1,
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information",
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Information_Social",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "None",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Monetary",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Social_Motivation", 
-                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Information_Motivation",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Social",
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Monetary", 
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Motivation", 
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Information_Social_Monetary", 
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Social_Motivation",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Social_Monetary",
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Motivation_Monetary",
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Social_Motivation_Monetary",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Social_Motivation_Monetary",
-                                              
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information",
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Monetary",
-                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Social_Motivation", 
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Information_Motivation",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing0" = "Feedback_Social",
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Monetary", 
-                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Motivation", 
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Social_Monetary", 
-                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing0" = "Feedback_Social_Motivation",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing0" = "Feedback_Social_Monetary",
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Feedback_Information_Motivation_Monetary",
-                                              
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Information_Social_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Monetary_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Social_Motivation_DynamicPricing", 
-                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Information_Motivation_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Social_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Monetary_DynamicPricing", 
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Motivation_DynamicPricing", 
-                                              "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Information_Social_Monetary_DynamicPricing", 
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Social_Motivation_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Social_Monetary_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Motivation_Monetary_DynamicPricing",
-                                              "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Social_Motivation_Monetary_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1:DynamicPricing1" = "Information_Social_Motivation_Monetary_DynamicPricing",
-                                              
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Monetary_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Social_Motivation_DynamicPricing", 
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Information_Motivation_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Monetary_DynamicPricing", 
-                                              "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Motivation_DynamicPricing", 
-                                              "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Social_Monetary_DynamicPricing", 
-                                              "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0:DynamicPricing1" = "Feedback_Social_Motivation_DynamicPricing",
-                                              "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1:DynamicPricing1" = "Feedback_Social_Monetary_DynamicPricing",
-                                              "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing1" = "Feedback_Information_Motivation_Monetary_DynamicPricing",
-                                              "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards1:DynamicPricing0" = "Information_Motivation_Monetary")
-                               
-)
-
-EffectSizeSummary_RE_f2 <- EffectSizeSummary_RE2 %>% 
-  filter (EffectSizeSummary_RE2$label %in% c("Information","Feedback","Social","Monetary","DynamicPricing","Motivation"))
+EffectSizeSummary_RE2 <- recode_binary_predictors(EffectSizeSumamry_RE2)
+EffectSizeSummary_RE2 <- process_order_label(EffectSizeSumamry_RE)
 ```
 
 ```{r meta-analysis of average effect size incl. publication bias}
 dfinc_all$se = (dfinc_all$var_smd)^(1/2)
 
-meta_all <- rma.mv(smd, var_smd, random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+meta_all <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML")
 summary(meta_all)
+compute_I2(meta_all)
 
 meta_all_se <-rma.mv(smd, var_smd, mods =  ~ se,
-                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML")
 summary(meta_all_se)
+compute_I2(meta_all_se)
 
 meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
-                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML")
 summary(meta_all_smd)
+compute_I2(meta_all_smd)
 
 dfinc_audit$se = (dfinc_audit$var_smd)^(1/2)
 
-meta_all <- rma.mv(smd, var_smd, random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_audit, method = "REML")
+meta_all <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
 summary(meta_all)
+compute_I2(meta_all)
 
 meta_all_se <-rma.mv(smd, var_smd, mods =  ~ se,
-                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_audit, method = "REML")
+                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
 summary(meta_all_se)
+compute_I2(meta_all_se)
 
 meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
-                               random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_audit, method = "REML")
+                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
 summary(meta_all_smd)
+compute_I2(meta_all_smd)
 ```
 
-```{r meta-analysis plots}
-ggplot(EffectSizeSummary_RE, aes(x = label, y = beta)) + 
-  geom_point(size = 2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "lightgrey") +
-  scale_y_continuous(limits = c(-1, 1.5)) +
-  scale_color_brewer(palette = "Dark2") +  
-  labs(x = "Number of interventions used", y = "") +
-  theme_bw() +
-  theme(
-    legend.position = "bottom", 
-    text = element_text(size = 7),
-    panel.grid.major = element_blank(), 
-    panel.grid.minor = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  ) + 
-  guides(color = FALSE)
-
-names(int_count) <- gsub("SocialComparison", "Social", names(int_count))
-names(int_count) <- gsub("MonetaryRewards", "Monetary", names(int_count))
-
-ggplot(EffectSizeSummary_RE, aes(y = paste0(label, " [", int_count[label], "]") , x = beta)) +
-  geom_point(shape=1,size=2, fill="white") +  # Effect size points
-  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # Horizontal error bars
-  theme_bw() +  # Minimal theme for a clean look
-  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") +  # Axis labels and title
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + # Vertical line at zero
-  #coord_flip() +
-  theme (axis.text.x = element_text(angle = 45, hjust = 1),
-         panel.grid = element_blank())+ 
-  xlim(-0.8,3.5) +
-    geom_text(aes(
-    label = ifelse(pvalues < 0.01,
-                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-                   ifelse(pvalues < 0.05,
-                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-                          ifelse(pvalues < 0.1,
-                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
-    x = 2.1), hjust = 0, size = 3)
-
-#ggsave("C:/Users/dand/Downloads/5-data-analysis/20250513-results/ma-forest.png")
-# C:\Users\dand\Downloads\5-data-analysis
-```
-
-```{r publication bias plots}
-ggplot(EffectSizeSummary_RE2, aes(y = paste0(label, " [", int_count[label], "]") , x = beta)) +
-  geom_point(shape=1,size=2, fill="white") +  # Effect size points
-  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # Horizontal error bars
-  theme_bw() +  # Minimal theme for a clean look
-  labs(x = "Effect Size (Beta)", y = "Intervention") + #, title = "Forest Plot") +  # Axis labels and title
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + # Vertical line at zero
-  #coord_flip() +
-  theme (axis.text.x = element_text(angle = 45, hjust = 1),
-         panel.grid = element_blank())+ 
-  xlim(-0.8,3.5) +
-    geom_text(aes(
-    label = ifelse(pvalues < 0.01,
-                   paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-                   ifelse(pvalues < 0.05,
-                          paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-                          ifelse(pvalues < 0.1,
-                            paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-                          paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
-    x = 2.1), hjust = 0, size = 3)
-
+```{r publication bias test and plot}
 library(lmtest)
 library(ggrepel)
 library(RColorBrewer)
 library(viridis)
 
 palette <- viridis(24)
-intervention_colors <- setNames(palette, unique(dfinc_audit$intervention))
-legend_labels <- levels(as.factor(dfinc_audit$intervention))
+intervention_colors <- setNames(palette, unique(dfinc_all$intervention))
+legend_labels <- levels(as.factor(dfinc_all$intervention))
 legend_labels <- gsub("^HomeAudit$", "Audit", legend_labels)
 legend_labels <- gsub("^SocialComparison$", "Social", legend_labels)
 legend_labels <- gsub("^MonetaryRewards$", "Monetary", legend_labels)
 
 ### FUNNEL PLOT ###
+egger_test_mv(model_reml)
+
 funnel(
-  dfinc_audit$smd, 
-  v = dfinc_audit$var_smd,
-  col = intervention_colors[as.factor(dfinc_audit$intervention)], 
+  dfinc_all$smd, 
+  v = dfinc_all$var_smd,
+  col = intervention_colors[as.factor(dfinc_all$intervention)], 
   legend = FALSE
 )
 
 # legend
-legend("topright",
-       legend = legend_labels,
-       col = intervention_colors,
-       pch = 15,
-       title = "Intervention",
-       cex = 0.5,
-       xpd = TRUE,
-       inset = c(0, 0),
-       bg = "white",
-       border = "white")
+# legend("topright",
+#        legend = legend_labels,
+#        col = intervention_colors,
+#        pch = 15,
+#        title = "Intervention",
+#        cex = 0.5,
+#        xpd = TRUE,
+#        inset = c(0, 0),
+#        bg = "white",
+#        border = "white")
 
-dev.copy(png, "funnel_plot_auditexclsmallint_legend.png", width = 480, height = 320)
-
-# Save the plot
+# save the plot
+dev.copy(png, "funnel_plot.png", width = 480, height = 320)
 dev.off()
 ```
 
@@ -658,23 +403,76 @@ nma_result$Gelman_Rubin_Diagnostics
 # =================================================
 ```
 
+```{r MA and NMA forest plots}
+# prepare intervention counts to match labels
+names(int_count) <- gsub("SocialComparison", "Social", names(int_count))
+names(int_count) <- gsub("MonetaryRewards", "Monetary", names(int_count))
 
-```{r calculate p-values for NMA results}
+# meta-analysis
+EffectSizeSummary_RE <- prep_num_label(EffectSizeSumamry_RE)
+
+ggplot(EffectSizeSummary_RE, aes(y = paste0(label, " [", int_count[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # fffect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # horizontal error bars
+  theme_bw() + 
+  labs(x = "Effect Size (Beta)", y = "Intervention") + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + 
+  theme (axis.text.x = element_text(hjust = 0.5),
+         panel.grid = element_blank())+ 
+  xlim(-0.5,1.5) +
+    geom_text(aes(
+  label = significance, x = 1), hjust = 0, size = 3)
+# ggsave("ma-forest.png", width = 7, height = 5)
+
+EffectSizeSummary_RE2 <- prep_num_label(EffectSizeSummary_RE2)
+
+ggplot(EffectSizeSummary_RE2 %>% filter(label!="var_smd"), aes(y = paste0(label, " [", int_count[label], "]") , x = beta)) +
+  geom_point(shape=1,size=2, fill="white") +  # effect size points
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color="black") +  # horizontal error bars
+  theme_bw() +  
+  labs(x = "Effect Size (Beta)", y = "Intervention") + 
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") + # vertical line at zero
+  theme (axis.text.x = element_text(hjust = 0.5),
+         panel.grid = element_blank())+ 
+  xlim(-0.5, 1.5) +
+    geom_text(aes(
+    label = significance, x = 1), hjust = 0, size = 3)
+# ggsave("ma-forestPB.png", width = 7, height = 5)
+
+# network meta-analysis (NMA)
+# add p-values
 nma_result$Summary_Results <- nma_result$Summary_Results %>%
   mutate(
     z_score = Mean / SD,  # Z-score formula
     p_value = 2 * pnorm(-abs(z_score))  # Two-tailed p-value based on Z-score
   )
 
-nma_result$Summary_Results <- nma_result$Summary_Results %>%
-  mutate(nma_result$Summary_Results,
-         sign = case_when(
-           p_value < 0.01 ~ "***",
-           p_value < 0.05 ~ "**",
-           p_value < 0.1 ~ "*"
-    
+# extract and prepare data
+EffectSizeSummary_NMA <- nma_result$Summary_Results %>%
+  mutate(
+    label = str_remove(Treatment, "^d\\.Control\\."), 
+    beta = Mean,
+    # split the CrI into lower and upper bounds
+    lower_lim = as.numeric(str_extract(X95..CrI, "(?<=\\().*?(?=,)")),
+    upper_lim = as.numeric(str_extract(X95..CrI, "(?<=,).*?(?=\\))")),
+    p_value = as.numeric(p_value)
   )
-  )
+
+EffectSizeSummary_NMA <- prep_num_label(EffectSizeSummary_NMA)
+
+ggplot(EffectSizeSummary_NMA %>% filter(label != "sd.d"), aes(y = paste0(label, " [", int_count[label], "]"), x = beta)) +
+  geom_point(shape = 1, size = 2, fill = "white") +
+  geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0, color = "black") +
+  theme_bw() +
+  labs(x = "Effect Size (Beta)", y = "Intervention") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  theme(
+    axis.text.x = element_text(hjust = 0.5),
+    panel.grid = element_blank()
+  ) +
+  xlim(-0.5, 1.5) +
+  geom_text(aes(label = significance, x = 1), hjust = 0, size = 3)
+ggsave("nma-forest.png", width = 7, height = 5)
 ```
 
 ```{r combine MA and NMA}
@@ -685,7 +483,7 @@ nma_df <- nma_result$Summary_Results %>%
          sucra = Mean) %>%
   select(Treatment, sucra, source)
 
-ma_df <- EffectSizeSummary_RE2 %>%
+ma_df <- EffectSizeSummary_RE %>%
   mutate(Treatment = label,
          source = "MA") %>%
   replace_na(list(Treatment = "Control")) %>%
@@ -715,7 +513,7 @@ p <- ggplot(plot_data) +
   theme(legend.title = element_blank())
 
 #save the plot
-ggsave("nma-ma-sucra.png", plot = p, width = 8, height = 8, dpi = 300)
+ggsave("20250613-results/nma-ma-sucra.png", plot = p, width = 8, height = 8, dpi = 300)
 ```
 
 After identifying and inspecting outliers, update dfinc processing in chunk line 213. Do this before running the analysis again and comparing your results.
@@ -753,6 +551,7 @@ outlier_cooksd5 <- dfinc4[above_threshold_rows5,]
 
 ```
 
+Main part of analysis is over here, but there are some extra tests below that you can run.
 ```{r network meta-regression and heterogeneity analysis}
 # NMR (Can be extended to risk of bias analysis)
 
@@ -794,7 +593,7 @@ nmr_results_all_df <- do.call(rbind, results_list_all)
 print(nmr_results_all_df)
 ```
 
-```{r analysis with audit separate - process intervention variables}
+```{r analysis with audit and dynamic pricing separate - process intervention variables}
 # ANALYSIS USING 7 MAIN CATEGORIES MAPPING - FEEDBACK, INFORMATION, HOMEAUDIT, SOCIAL, MOTIVATION, MONETARYREWARDS, DYNAMICPRICING 
 
 ## Prepare Interventions for Analysis
@@ -831,18 +630,18 @@ dfinc_audit <- dfinc %>%
 # intervention combination with >=5 observations 
 # execute if you want to exclude studies that has intervention types with < 5 observations
 treat_counts <- dfinc_audit %>%
-  group_by(treatment) %>%
+  group_by(intervention) %>%
   summarise(count = n(), .groups = 'drop')
 treats_to_remove <- treat_counts %>%
   filter(count < 5) %>%
-  select(treatment, count)
+  select(intervention, count)
 print(treats_to_remove)
 
 # more data exclusion criteria
 dfinc_audit <- dfinc_audit %>%
 #   filter(total_sample_size <= quantile(dfinc_audit$total_sample_size, 0.97)) %>% 
   # exclude studies with top 3% sample size
-  filter(!(treatment %in% treats_to_remove$treatment)) 
+  filter(!(intervention %in% treats_to_remove$intervention)) 
 # exclude studies with intervention type that has < 5 observations
 ```
 
@@ -881,16 +680,13 @@ names(int_count_audit) <- gsub("HomeAudit", "Audit", names(int_count_audit))
 # dfinc_audit <- dfinc_audit %>%
 #  filter (intervention %in% c("Feedback","Information","HomeAudit","SocialComparison","Motivation","MonetaryRewards", "DynamicPricing"))
 
+model_audit <- rma.mv(smd, var_smd, random = ~ 1| as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML",
+                                             mods = ~ Feedback:Information:HomeAudit:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0)
+                                       
+compute_I2(model_audit)
+  
 EffectSizeSummary_RE_audit <- data_frame() 
-
-EffectSizeSummary_RE_audit <- rbind(EffectSizeSummary_RE_audit,
-                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_audit, method = "REML",
-                                             
-                                             mods = ~ Feedback:Information:HomeAudit:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0
-                                             
-                                )
-                                )
-  )
+EffectSizeSummary_RE_audit <- rbind(EffectSizeSummary_RE_audit, tidy3(model_audit))
 
 EffectSizeSummary_RE_audit <- separate(EffectSizeSummary_RE_audit, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information","HomeAudit", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
 
@@ -980,20 +776,20 @@ EffectSizeSummary_RE_audit <- mutate(EffectSizeSummary_RE_audit,
                                
 )
 
-EffectSizeSummary_RE_audit_f <- EffectSizeSummary_RE_audit %>% 
-  filter (EffectSizeSummary_RE_audit$label %in% c("Information","Feedback","Audit","Social","Monetary","DynamicPricing","Motivation"))
+# EffectSizeSummary_RE_audit_f <- EffectSizeSummary_RE_audit %>% 
+#   filter (EffectSizeSummary_RE_audit$label %in% c("Information","Feedback","Audit","Social","Monetary","DynamicPricing","Motivation"))
 ```
 
 ```{r analysis with audit separate - meta-analysis correcting for publication bias}
-EffectSizeSummary_RE2_audit <- data_frame() 
+model_auditPB <- rma.mv(smd, var_smd, random = ~ 1| as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML",
+                                             
+                                             mods = ~ Feedback:Information:HomeAudit:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0+var_smd)
 
+compute_I2(model_auditPB)
+
+EffectSizeSummary_RE2_audit <- data_frame() 
 EffectSizeSummary_RE2_audit <- rbind(EffectSizeSummary_RE2_audit,
-                                tidy3(rma.mv(smd, var_smd, random = ~ as.factor(InterventionID) | `documentID`, data = dfinc_audit, method = "REML",
-                                             
-                                             mods = ~ Feedback:Information:HomeAudit:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0+var_smd
-                                             
-                                )
-                                )
+                                tidy3(model_auditPB)
   )
 
 EffectSizeSummary_RE2_audit <- separate(EffectSizeSummary_RE2_audit, model, sep = "[^[:alnum:]]+", into = c("Feedback", "Information","HomeAudit", "SocialComparison", "Motivation", "MonetaryRewards","DynamicPricing"))
@@ -1099,28 +895,26 @@ df$label_with_count <- factor(
 )
 
 # create plot
-ggplot(df, aes(y = label_with_count, x = beta)) +
+ggplot(df, aes(y = paste0(label, " [", int_count_audit[label], "]"), x = beta)) +
   geom_point(shape = 1, size = 2) +
   geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   geom_text(aes(
-    label = ifelse(pvalues < 0.01, paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-             ifelse(pvalues < 0.05, paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-             ifelse(pvalues < 0.1, paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+    label = ifelse(pvalues < 0.001, paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+             ifelse(pvalues < 0.01, paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+             ifelse(pvalues < 0.05, paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
                                 paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
-    x = 2.1),
-    hjust = 0.25, size = 3) +
-  xlim(-0.8, 3.5) +
-  labs(x = "", y = "") +
+    x = 1),
+    hjust = 0, size = 3) +
+  xlim(-0.5, 1.5) +
+  labs(x = "Effect Size (Beta)", y = "Intervention") +
   theme_bw() +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-    axis.text.y = element_text(size = 12, lineheight = 0.25),
-    #axis.title = element_text(size = 14),
+    axis.text.x = element_text(hjust = 0.5),
     panel.grid = element_blank()
   )
 
-ggsave("ma-forest-audit_exclsmallint.png")
+ggsave("ma-forest-audit.png", width = 7, height = 5)
 ```
 
 ```{r analysis with audit separate - meta-analysis with publication bias plots}
@@ -1134,33 +928,32 @@ df2$label_with_count <- factor(
 )
 
 # create plot
-ggplot(df2, aes(y = label_with_count, x = beta)) +
+ggplot(df2, aes(y = paste0(label, " [", int_count_audit[label], "]"), x = beta)) +
   geom_point(shape = 1, size = 2) +
   geom_errorbarh(aes(xmin = lower_lim, xmax = upper_lim), height = 0) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   geom_text(aes(
-    label = ifelse(pvalues < 0.01, paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-             ifelse(pvalues < 0.05, paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
-             ifelse(pvalues < 0.1, paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+    label = ifelse(pvalues < 0.001, paste0(round(beta, 2), "***  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+             ifelse(pvalues < 0.01, paste0(round(beta, 2), "**  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
+             ifelse(pvalues < 0.05, paste0(round(beta, 2), "*  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")"),
                                 paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
-    x = 2.1),
-    hjust = 0.25, size = 3) +
-  xlim(-0.8, 3.5) +
-  labs(x = "", y = "") +
+    x = 1),
+    hjust = 0, size = 3) +
+  xlim(-0.5, 1.5) +
+  labs(x = "Effect Size (Beta)", y = "Intervention") +
   theme_bw() +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-    axis.text.y = element_text(size = 12, lineheight = 0.25),
-    #axis.title = element_text(size = 14),
+    axis.text.x = element_text(hjust = 0.5),
     panel.grid = element_blank()
   )
 
-ggsave("ma-forest-audit-smd_var_exclsmallint.png")
-
+ggsave("ma-forest-auditPB.png", height = 7, width = 5)
 ```
 
 ```{r analysis with audit separate - network meta-analysis incl. plots}
 ### NMA ###
+
+dfinc_audit <- dfinc_audit %>% filter(!is.na(treatment))
 
 # set up data structure for nma
 df_meta_audit <- dfinc_audit %>%
@@ -1222,7 +1015,7 @@ ggplot(plot_df_audit, aes(y = label_with_count, x = beta)) +
     #axis.title = element_text(size = 14),
     panel.grid = element_blank()
   )
-ggsave("nma-forest-audit-exclsmallint.png")
+ggsave("nma-forest-audit.png")
 ```
 
 ```{r analysis with audit separate - combine MA and NMA}
@@ -1261,105 +1054,16 @@ p_audit <- ggplot(plot_data_audit) +
   theme(legend.title = element_blank())
 print(p_audit)
 #save the plot
-ggsave("nma-ma-sucra-auditexclsmallint-publicationbiasadjusted.png", plot = p, width = 8, height = 8, dpi = 300)
-```
-
-```{r write summary statistics}
-# factor variables
-sumVarsFactor <- c(#"intervention",
-                   "Opt_in_out",
-                   "StatsMethod",
-                   "StudyDesign",
-                   "Randomisation",
-                   "Region",
-                   "Weather",
-                   "cat_criterion1",
-                   "cat_criterion2",
-                   "cat_criterion5",
-                   "cat_criterion6",
-                   "cat_criterion7")
-
-# numeric variables
-sumvarsNum <- c("smd",
-                "var_smd")
-
-dfinc_all[sumVarsFactor] <- lapply(dfinc_all[sumVarsFactor], factor)
-dfinc_all[sumvarsNum] <- lapply(dfinc_all[sumvarsNum], as.numeric)
-
-for(col in names(select(dfinc_all,all_of(sumVarsFactor)))) {
-  freq_table <- freq(dfinc_all[[col]], style = "rmarkdown", cumul=FALSE, report.nas = FALSE, totals = FALSE)
-  print(freq_table)
-}
-
-dfinc_all %>%
-  select(all_of(c(sumVarsFactor,sumvarsNum))) %>% 
-  dfSummary(graph.col = T, style = "grid", na.col = FALSE) %>%
-  print(file = "summarystatistics24042025.html")
-rmarkdown::render("summarystatistics22042025.html", output_file = "summarystatistics22042025.doc")
-```
-
-```{r write summary statistics per intervention}
-
-dfinc4 <- dfinc_audit %>% filter(dfinc_all$intervention %in% c("Feedback", "Information", "SocialComparison", "Motivation", "MonetaryRewards", "DynamicPricing", "Audit")) 
-
-# add audit as a separate category if desirable
-
-# write summary statistics for all different intervention categories
-# dfinc4 <- dfinc
-
-dfinc4[sumVarsFactor] <- lapply(dfinc4[sumVarsFactor], factor)
-dfinc4[sumvarsNum] <- lapply(dfinc4[sumvarsNum], as.numeric)
-
-# list of interventions
-unique_interventions <- unique(dfinc4$intervention)
-
-# Create an empty list to store the summary tables for each intervention
-summary_list <- list()
-
-# Loop through each intervention and create the summary
-for (interv in unique_interventions) {
-  # Filter the data for the specific intervention
-  df_interv <- dfinc4 %>% filter(intervention == interv)
-  
-  # Create the summary statistics for the filtered data
-  summary <- df_interv %>%
-    select(all_of(c(sumVarsFactor, sumvarsNum))) %>% 
-    dfSummary(graph.col = FALSE, style = "grid", na.col = FALSE)
-  
-  # Add the summary table to the list, with the name of the intervention as the title
-  summary_list[[interv]] <- summary
-}
-
-# Combine all summaries into a single data frame, with an extra column for the intervention
-combined_summary <- bind_rows(
-  lapply(names(summary_list), function(interv) {
-    summary_data <- summary_list[[interv]]
-    summary_data <- as.data.frame(summary_data)
-    summary_data$Intervention <- interv
-    return(summary_data)
-  })
-)
-
-# Save the combined summary as a single HTML file
-combined_summary %>%
-  kable("html", escape = FALSE, caption = "Summary Statistics by Intervention") %>%
-  kable_styling(full_width = TRUE) %>%
-  save_kable("summarystatistics_combined-20250514.html")
-
-# Convert the HTML to a DOC file using rmarkdown
-rmarkdown::render(
-  input = "summarystatistics_combined-20250514.html",
-  output_file = "summarystatistics_combined-20250514.doc"
-)
+ggsave("nma-maPB-sucra-audit.png", plot = p, width = 8, height = 8, dpi = 300)
 ```
 
 ```{r split the dataset by risk of bias levels}
-dfinc_all$se = (dfinc_all$var_smd)^(1/2)
 # including all effect sizes on 5 major interventions 
-dfinclow <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "low")
-dfincmed <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "medium")
-dfinchigh <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "high")
-table(dfinc_all$cat_criterion1)
+# dfinclow <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "low")
+# dfincmed <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "medium")
+# dfinchigh <- dfinc_all %>% filter(dfinc_all$cat_criteria_sum == "high")
+
+table(dfinc_all$cat_criterion2)
 
 dfinclow <- dfinc_all %>% filter(dfinc_all$cat_criterion7 == "1")
 #dfinclow <- dfinclow %>% filter (!dfinclow$intervention == "MonetaryRewards")
@@ -1536,7 +1240,7 @@ ggplot(effectisizesummary_re_low, aes(y = paste0(label, " [", int_count_low[labe
     x = 2.1), hjust = 0, size = 3)
 
 
-ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/1cat-low.png", width = 6, height = 6, dpi = 300)
+ggsave("/1cat-low.png", width = 6, height = 6, dpi = 300)
 ```
 
 ```{r meta-analysis on studies with medium risk of bias}
@@ -1667,7 +1371,7 @@ ggplot(effectisizesummary_re_med, aes(y = paste0(label, " [", int_count_med[labe
 # feedback_socialcomparison_motivation seems to have a very strange effect 
 # d <- dfincmed %>% filter(dfincmed$intervention == "Feedback_SocialComparison_Motivation")
 
-ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/2cat-med.png", width = 6, height = 6, dpi = 300)
+ggsave("2cat-med.png", width = 6, height = 6, dpi = 300)
 ```
 
 ```{r meta-analysis on studies with high risk of bias}
@@ -1789,11 +1493,10 @@ ggplot(effectisizesummary_re_high, aes(y = paste0(label, " [", int_count_high[la
                           paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
     x = 2.1), hjust = 0, size = 3)
 
-ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/7cat-high.png", width = 6, height = 6, dpi = 300)
+ggsave("7cat-high.png", width = 6, height = 6, dpi = 300)
 ```
 
 ```{r meta-analysis on studies with low-medium risk of bias}
-
 # run the REML and display on the same graph
 effectisizesummary_re_lowmed <- data_frame() 
 # does not achieve convergence
@@ -1912,7 +1615,7 @@ ggplot(effectisizesummary_re_lowmed, aes(y = paste0(label, " [", int_count_lowme
                           paste0(round(beta, 2), "  (", round(lower_lim, 2), ",", round(upper_lim, 2), ")")))),
     x = 2.1), hjust = 0, size = 3)
 
-ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/risk-of-bias/7cat-lowmed.png", width = 6, height = 6, dpi = 300)
+ggsave("7cat-lowmed.png", width = 6, height = 6, dpi = 300)
 ```
 
 ```{r meta-analysis on studies with low-medium risk of bias}
@@ -1935,8 +1638,7 @@ ggplot(coef_summarylowmed, aes(y = reorder(rownames(coef_summarylowmed),-estimat
   theme (axis.text.x = element_text(angle = 45, hjust = 1)) + 
   ggtitle("Meta-analysis of studies with low-medium overall risk of bias")
 
-#ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/outlier-test/lowmedoverallrob-forest.png", width = 6, height = 6, dpi = 300)
-
+#ggsave("lowmedoverallrob-forest.png", width = 6, height = 6, dpi = 300)
 ```
 
 ```{r display different risk of bias levels on the same graph}
@@ -1958,11 +1660,10 @@ ggplot(combined_coef_summary, aes(y = reorder(rownames(combined_coef_summary), -
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   scale_color_manual(values = c("low" = "blue", "medium" = "orange", "high" = "green")) 
 
-ggsave("C:/Users/dand/OneDrive/05 Living Review/Baseline 2024/5-data-analysis/outlier-test/overallrob-forest.png", width = 6, height = 6, dpi = 300)
+ggsave("overallrob-forest.png", width = 6, height = 6, dpi = 300)
 ```
 
 ```{r print regression outputs}
-
 # print regression outputs to console
 
 #screenreg == summary

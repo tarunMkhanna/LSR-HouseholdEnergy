@@ -28,35 +28,66 @@ sucra = function(x, lower.is.better = FALSE) {
 # Intervention Mapping
 mapping_vector <- c(
   "Control" = "Control",
-  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryIncentives0" = "Information",
-  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryIncentives0" = "Information_Social",
-  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryIncentives0" = "None",
-  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryIncentives1" = "Monetary",
-  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryIncentives0" = "Information_Social_Motivation", 
-  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryIncentives0" = "Information_Motivation",
-  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryIncentives0" = "Social",
-  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryIncentives1" = "Information_Monetary", 
-  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryIncentives0" = "Motivation", 
-  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryIncentives1" = "Information_Social_Monetary", 
-  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryIncentives0" = "Social_Motivation",
-  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryIncentives1" = "Social_Monetary",
-  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryIncentives1" = "Motivation_Monetary",
-  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryIncentives1" = "Social_Motivation_Monetary",
-  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryIncentives1" = "Information_Social_Motivation_Monetary",
+  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0" = "Information",
+  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0" = "Information_Social",
+  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0" = "None",
+  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1" = "Monetary",
+  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0" = "Information_Social_Motivation", 
+  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0" = "Information_Motivation",
+  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0" = "Social",
+  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1" = "Information_Monetary", 
+  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0" = "Motivation", 
+  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1" = "Information_Social_Monetary", 
+  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0" = "Social_Motivation",
+  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1" = "Social_Monetary",
+  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1" = "Motivation_Monetary",
+  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1" = "Social_Motivation_Monetary",
+  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1" = "Information_Social_Motivation_Monetary",
   
-  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryIncentives0" = "Feedback_Information",
-  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryIncentives0" = "Feedback_Information_Social",
-  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryIncentives0" = "Feedback",
-  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryIncentives1" = "Feedback_Monetary",
-  "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryIncentives0" = "Feedback_Information_Social_Motivation", 
-  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryIncentives0" = "Feedback_Information_Motivation",
-  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryIncentives0" = "Feedback_Social",
-  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryIncentives1" = "Feedback_Information_Monetary", 
-  "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryIncentives0" = "Feedback_Motivation", 
-  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryIncentives1" = "Feedback_Information_Social_Monetary", 
-  "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryIncentives0" = "Feedback_Social_Motivation",
-  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryIncentives1" = "Feedback_Social_Monetary",
-  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryIncentives1" = "Feedback_Information_Motivation_Monetary"
+  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0" = "Feedback_Information",
+  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0" = "Feedback_Information_Social",
+  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0" = "Feedback",
+  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1" = "Feedback_Monetary",
+  "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0" = "Feedback_Information_Social_Motivation", 
+  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0" = "Feedback_Information_Motivation",
+  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0" = "Feedback_Social",
+  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1" = "Feedback_Information_Monetary", 
+  "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0" = "Feedback_Motivation", 
+  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1" = "Feedback_Information_Social_Monetary", 
+  "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0" = "Feedback_Social_Motivation",
+  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1" = "Feedback_Social_Monetary",
+  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1" = "Feedback_Information_Motivation_Monetary",
+  
+  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards0" = "Information",
+  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards0" = "Information_Social",
+  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0" = "DynamicPricing",
+  "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards1" = "Monetary",
+  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards0" = "Information_Social_Motivation", 
+  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards0" = "Information_Motivation",
+  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards0" = "Social",
+  "Feedback0:Information1:SocialComparison0:Motivation0:MonetaryRewards1" = "Information_Monetary", 
+  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards0" = "Motivation", 
+  "Feedback0:Information1:SocialComparison1:Motivation0:MonetaryRewards1" = "Information_Social_Monetary", 
+  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards0" = "Social_Motivation",
+  "Feedback0:Information0:SocialComparison1:Motivation0:MonetaryRewards1" = "Social_Monetary",
+  "Feedback0:Information0:SocialComparison0:Motivation1:MonetaryRewards1" = "Motivation_Monetary",
+  "Feedback0:Information0:SocialComparison1:Motivation1:MonetaryRewards1" = "Social_Motivation_Monetary",
+  "Feedback0:Information1:SocialComparison1:Motivation1:MonetaryRewards1" = "Information_Social_Motivation_Monetary",
+  
+  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards0" = "Feedback_Information",
+  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards0" = "Feedback_Information_Social",
+  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards0" = "Feedback",
+  "Feedback1:Information0:SocialComparison0:Motivation0:MonetaryRewards1" = "Feedback_Monetary",
+  "Feedback1:Information1:SocialComparison1:Motivation1:MonetaryRewards0" = "Feedback_Information_Social_Motivation", 
+  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards0" = "Feedback_Information_Motivation",
+  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards0" = "Feedback_Social",
+  "Feedback1:Information1:SocialComparison0:Motivation0:MonetaryRewards1" = "Feedback_Information_Monetary", 
+  "Feedback1:Information0:SocialComparison0:Motivation1:MonetaryRewards0" = "Feedback_Motivation", 
+  "Feedback1:Information1:SocialComparison1:Motivation0:MonetaryRewards1" = "Feedback_Information_Social_Monetary", 
+  "Feedback1:Information0:SocialComparison1:Motivation1:MonetaryRewards0" = "Feedback_Social_Motivation",
+  "Feedback1:Information0:SocialComparison1:Motivation0:MonetaryRewards1" = "Feedback_Social_Monetary",
+  "Feedback1:Information1:SocialComparison0:Motivation1:MonetaryRewards1" = "Feedback_Information_Motivation_Monetary",
+  "Feedback0:Information1:SocialComparison0:Motivation1:MonetaryRewards1" = "Information_Motivation_Monetary"
 )
 
 mapping_vector_audit <- c(
@@ -90,6 +121,7 @@ mapping_vector_audit <- c(
   "Feedback1:Information0:HomeAudit1:SocialComparison0:Motivation0:MonetaryIncentives0" = "Feedback_Audit",
   "Feedback0:Information0:HomeAudit0:SocialComparison1:Motivation1:MonetaryIncentives1" = "Social_Motivation_Monetary"
 )
+
 
 # Network Meta Analysis Function
 network_meta_analysis <- function(df, adapt=10000, iter=100000, thin=10) {
@@ -139,7 +171,8 @@ network_meta_analysis <- function(df, adapt=10000, iter=100000, thin=10) {
   # x11()
   plot(rank_all, beside = TRUE, cex.names = 0.5)
   # x11()
-  forest(relative.effect(mc_results, t1 = "Control"))
+  
+  #forest(relative.effect(mc_results, t1 = "Control")) # this line is currently causing an error
   league_tbl <- relative.effect.table(mc_results)
   # dev.off()
   
