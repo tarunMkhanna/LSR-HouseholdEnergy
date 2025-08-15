@@ -231,7 +231,7 @@ dfinc_all <- dfinc_all %>%
 # MA (Comparing interventions in a meta regression model and interactions)
 
 model_reml <- rma.mv(smd, var_smd, random = ~ 1| as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML",
-                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0)
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+var_smd+0)
 # compute I^2
 compute_I2(model_reml)
 
@@ -248,7 +248,7 @@ EffectSizeSummary_RE <- process_order_label(EffectSizeSummary_RE)
 
 model_remlPB <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML",
                                              
-                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0+var_smd)
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0)
 # calculate I^2
 compute_I2(model_remlPB)
 
@@ -277,21 +277,21 @@ meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
 summary(meta_all_smd)
 compute_I2(meta_all_smd)
 
-dfinc_audit$se = (dfinc_audit$var_smd)^(1/2)
+#dfinc_audit$se = (dfinc_audit$var_smd)^(1/2)
 
-meta_all <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
-summary(meta_all)
-compute_I2(meta_all)
-
-meta_all_se <-rma.mv(smd, var_smd, mods =  ~ se,
-                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
-summary(meta_all_se)
-compute_I2(meta_all_se)
-
-meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
-                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
-summary(meta_all_smd)
-compute_I2(meta_all_smd)
+# meta_all <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
+# summary(meta_all)
+# compute_I2(meta_all)
+# 
+# meta_all_se <-rma.mv(smd, var_smd, mods =  ~ se,
+#                                random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
+# summary(meta_all_se)
+# compute_I2(meta_all_se)
+# 
+# meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
+#                                random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
+# summary(meta_all_smd)
+# compute_I2(meta_all_smd)
 ```
 
 ```{r publication bias test and plot}
