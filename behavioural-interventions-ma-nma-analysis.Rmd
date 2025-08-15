@@ -126,6 +126,9 @@ library(flextable)
 dfinc_unique <- dfinc_all %>%
   distinct(Authors, `document PY`, `document title`, statistical_technique, study_design, dependent_variable, country, randomisation_dummy, Opt_in_out, intervention, control)
 
+dfinc_includes <- dfinc_all %>%
+  distinct(Authors, `document PY`, `document title`)
+
 dfinc_unique$control[is.na(dfinc_unique$control)] <- "no treatment"
 
 dfinc_unique$`document PY` <- as.character(dfinc_unique$`document PY`)
@@ -231,7 +234,7 @@ dfinc_all <- dfinc_all %>%
 # MA (Comparing interventions in a meta regression model and interactions)
 
 model_reml <- rma.mv(smd, var_smd, random = ~ 1| as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML",
-                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+var_smd+0)
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0)
 # compute I^2
 compute_I2(model_reml)
 
@@ -248,7 +251,7 @@ EffectSizeSummary_RE <- process_order_label(EffectSizeSummary_RE)
 
 model_remlPB <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_all, method = "REML",
                                              
-                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0)
+                                             mods = ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards+0+var_smd)
 # calculate I^2
 compute_I2(model_remlPB)
 
@@ -277,21 +280,90 @@ meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
 summary(meta_all_smd)
 compute_I2(meta_all_smd)
 
-#dfinc_audit$se = (dfinc_audit$var_smd)^(1/2)
+dfinc_audit$se = (dfinc_audit$var_smd)^(1/2)
 
-# meta_all <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
-# summary(meta_all)
-# compute_I2(meta_all)
-# 
-# meta_all_se <-rma.mv(smd, var_smd, mods =  ~ se,
-#                                random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
-# summary(meta_all_se)
-# compute_I2(meta_all_se)
-# 
-# meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
-#                                random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
-# summary(meta_all_smd)
-# compute_I2(meta_all_smd)
+meta_all <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
+summary(meta_all)
+compute_I2(meta_all)
+
+meta_all_se <-rma.mv(smd, var_smd, mods =  ~ se,
+                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
+summary(meta_all_se)
+compute_I2(meta_all_se)
+
+meta_all_smd <-rma.mv(smd, var_smd, mods =  ~ var_smd,
+                               random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_audit, method = "REML")
+summary(meta_all_smd)
+compute_I2(meta_all_smd)
+```
+```{r meta-analysis of average effect size for individual interventions}
+dfinc_all$author_year <- paste0(dfinc_all$Authors, "(", dfinc_all$`document PY`, ")")
+
+dfinc_social <- dfinc_all %>% filter(treatment == "Social")
+
+meta_social <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_social, method = "REML")
+summary(meta_social)
+compute_I2(meta_social)
+
+png(file = "meta_social_forest.png", width = 1800, height = 2400, res = 300)
+metafor::forest.rma(x = meta_social,header = TRUE, 
+                    slab = dfinc_social$effectID,
+                    xlim = c(-1, 2),
+                    cex = 0.6)
+dev.off()
+
+dfinc_motivation <- dfinc_all %>% filter(treatment == "Motivation")
+
+meta_motivation <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_motivation, method = "REML")
+summary(meta_motivation)
+compute_I2(meta_motivation)
+
+png(file = "meta_motivation_forest.png", width = 1800, height = 1500, res = 300)
+metafor::forest.rma(x = meta_motivation,header = TRUE, 
+                    slab = dfinc_motivation$effectID,
+                    xlim = c(-1, 2),
+                    cex = 0.6)
+dev.off()
+
+dfinc_monetary <- dfinc_all %>% filter(treatment == "Monetary")
+
+meta_monetary <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_monetary, method = "REML")
+summary(meta_monetary)
+compute_I2(meta_monetary)
+
+png(file = "meta_monetary_forest.png", width = 1800, height = 1500, res = 300)
+metafor::forest.rma(x = meta_monetary,header = TRUE, 
+                    slab = dfinc_monetary$effectID,
+                    xlim = c(-1, 2),
+                    cex = 0.6)
+dev.off()
+
+dfinc_information <- dfinc_all %>% filter(treatment == "Information")
+
+meta_information <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_information, method = "REML")
+summary(meta_information)
+compute_I2(meta_information)
+
+png(file = "meta_information_forest.png", width = 1800, height = 3000, res = 300)
+metafor::forest.rma(x = meta_information,header = TRUE, 
+                    slab = dfinc_information$effectID,
+                    xlim = c(-1, 2),
+                    cex = 0.6)
+dev.off()
+
+dfinc_feedback <- dfinc_all %>% filter(treatment == "Feedback")
+
+meta_feedback <- rma.mv(smd, var_smd, random = ~ 1|as.factor(documentID)/as.factor(effectID), data = dfinc_feedback, method = "REML")
+summary(meta_feedback)
+compute_I2(meta_feedback)
+
+png(file = "meta_feedback_forest.png", width = 1800, height = 4500, res = 300)
+metafor::forest.rma(x = meta_feedback,header = TRUE, 
+                    slab = dfinc_feedback$effectID,
+                    xlim = c(-1, 2),
+                    cex = 0.6)
+dev.off()
+
 ```
 
 ```{r publication bias test and plot}
@@ -541,7 +613,7 @@ for (i in 1:length(x5)) {
 
 #70, 235, 272, 273
 # 70 - Meub et al. 2019 report a VERY low SE compared to the size of difference of means, which leads to a t-stat of 128
-# 235 - Matsukawa 2018 also report VERY low SEs compared to the size of coeffcients, which leads to very large t-stats
+# 235 - Matsukawa 2018 also report VERY low SEs compared to the size of coefficients, which leads to very large t-stats
 # 272, 273 Staats et al. 2004 nothing visibly different
 
 below_threshold_rows5 <- which(x5 < threshold)

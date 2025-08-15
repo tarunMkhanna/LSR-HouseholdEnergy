@@ -489,7 +489,7 @@ dfinc$InterventionID <- 1:nrow(dfinc)
 library(openxlsx)
 dfinc$Authors <- gsub("<br>", "", dfinc$Authors)
 
-unique_combinations <- unique(dfinc_all[, c("documentID", "Authors", "document PY")])
+unique_combinations <- unique(dfinc_all[, c("document title", "Authors", "document PY")])
 
 # unique_combinations <- unique(dfinc_all[, c("documentID", "Authors", "document PY", "country","total_sample_size")])
 
@@ -498,8 +498,28 @@ unique_combinations <- unique(dfinc_all[, c("documentID", "Authors", "document P
 # first_per_doc <- unique_combinations[!duplicated(unique_combinations$documentID), ]
 # sum(first_per_doc$total_sample_size, na.rm = TRUE)
 
-write.xlsx(unique_combinations, "combined_included_2025-06-18.xlsx")
+write.xlsx(unique_combinations, "combined_included_2025-06-26.xlsx")
 ```
+
+```{r record final exclusions (add them to incomplete statistical information)}
+
+library(dplyr)
+
+# Define the key columns
+key_cols <- c("document title", "Authors", "document PY")
+
+# Create unique sets based on those columns
+dfinc_keys <- dfinc %>% distinct(across(all_of(key_cols)))
+dfinc_all_keys <- dfinc_all %>% distinct(across(all_of(key_cols)))
+
+# Find rows in dfinc that are not in dfinc_all
+only_in_dfinc <- anti_join(dfinc_keys, dfinc_all_keys, by = key_cols)
+
+# Find rows in dfinc_all that are not in dfinc
+only_in_dfinc_all <- anti_join(dfinc_all_keys, dfinc_keys, by = key_cols)
+
+```
+
 
 ```{r attach newer data to older data and deduplicate}
 dfinc_new <- dfinc

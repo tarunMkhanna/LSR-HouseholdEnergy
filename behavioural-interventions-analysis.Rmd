@@ -1,0 +1,280 @@
+---
+title: "Behavioral, information and monetary interventions to reduce energy consumption in households: A “living” systematic review"
+author: "diana danilenko"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      results="hide",
+                      error = F,
+                      warning = F,
+                      message = F)
+```
+
+```{r libraries}
+library(metafor) 
+library(meta)
+library(metadat)
+library(dplyr)
+library(ggplot2)
+library(texreg)
+library(tidyverse) 
+library(summarytools)
+library(htmltools)
+library(rmarkdown)
+library(devtools)
+library(clubSandwich)
+library(cowplot)
+library(ggrepel) 
+library(igraph)
+library(nmarank)
+library(knitr)
+library(kableExtra)
+library(gemtc)
+library(rjags)
+library(gridExtra)
+library(modelsummary)
+library(readr)
+library(boot)
+library(haven)
+library(stringr)
+library(shiny)
+library(readxl)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+
+```{r functions}
+source("functions_v1.R")
+source("functions_nma.R")
+```
+
+```{r data}
+load("lsr_data_2025-20250513.R")
+# save data in R database before outlier exlusion
+# save(dfinc,file="lsr_data_2024-11042025.R")
+```
+
+```{r process}
+# ANALYSIS USING 6 MAIN CATEGORIES MAPPING - FEEDBACK, INFORMATION, SOCIAL, MOTIVATION, MONETARY, DYNAMICPRICING
+
+# Prepare data for analysis
+dfinc_all <- dfinc %>%
+  mutate(
+    Feedback = ifelse(`Historical` == 1  | `Home Energy Report` == 1 | `In home display` == 1 | `Smart Metering` == 1, 1, 0),
+    Information = ifelse(`Awareness Campaign` == 1 | `Bills` == 1 |`Home audits` == 1 | `tips` == 1, 1, 0),
+    SocialComparison = ifelse(`Injunctive Norm / Social Norm` == 1 | `peer comparison` == 1, 1, 0),
+    Motivation = ifelse(`Commitment strategies` == 1 | `Competition` == 1 | `Gamification` == 1 | `Goal Setting` == 1 | `Moral suasion` == 1, 1, 0),
+    DynamicPricing = ifelse(`Critical Peak Pricing` == 1 | `Dynamic Pricing` == 1 | `Peak Load Pricing` == 1 | `Real-time Pricing` == 1 | `ToU` == 1,  1, 0),
+    MonetaryRewards = ifelse(`Rewards` == 1, 1, 0)
+  ) %>% 
+  replace_na(list(
+    Feedback = 0,
+    Information = 0,
+    SocialComparison = 0,
+    Motivation = 0,
+    MonetaryRewards = 0,
+    DynamicPricing = 0
+  )) %>%
+  mutate(Feedback_2 = ifelse(Feedback == 1, "Feedback1", "Feedback0")) %>% 
+  mutate(Information_2 = ifelse(Information == 1, "Information1", "Information0")) %>% 
+  mutate(SocialComparison_2 = ifelse(SocialComparison == 1, "SocialComparison1", "SocialComparison0")) %>% 
+  mutate(Motivation_2 = ifelse(Motivation == 1, "Motivation1", "Motivation0")) %>% 
+  mutate(MonetaryRewards_2 = ifelse(MonetaryRewards == 1, "MonetaryRewards1", "MonetaryRewards0")) %>%
+  mutate(DynamicPricing_2 = ifelse(DynamicPricing == 1, "DynamicPricing1", "DynamicPricing0")) %>%
+  mutate(Treatment1 = paste(Feedback_2, Information_2, SocialComparison_2, Motivation_2, MonetaryRewards_2, DynamicPricing_2, sep = ":")) %>%
+  filter(Treatment1 != "Feedback0:Information0:SocialComparison0:Motivation0:MonetaryRewards0:DynamicPricing0") %>% # Exclude effect size that doesn't get mapped to a valid intervention
+  mutate(treatment = mapping_vector[Treatment1])
+
+dfinc_all <- dfinc_all %>%
+  mutate(intervention = apply(select(., Feedback, Information, SocialComparison, Motivation, MonetaryRewards, DynamicPricing), 1, function(row) {
+    cols <- names(row)[which(row == 1)]   # get names of columns where the value is 1
+    if(length(cols) > 0) {
+      paste(cols, collapse = "_")         # concatenate with underscore
+    } else {
+      NA                                  # if no values are 1, set to NA
+    }
+  }))
+
+dfinc_all$InterventionID <- 1:nrow(dfinc_all)
+
+dfinc_all$Feedback <- factor(dfinc_all$Feedback)
+dfinc_all$Information <- factor(dfinc_all$Information)
+dfinc_all$SocialComparison <- factor(dfinc_all$SocialComparison)
+dfinc_all$Motivation <- factor(dfinc_all$Motivation)
+dfinc_all$MonetaryRewards <- factor(dfinc_all$MonetaryRewards)
+dfinc_all$DynamicPricing <- factor(dfinc_all$DynamicPricing)
+```
+
+Our living systematic review and meta-analysis continuously integrate available evidence to answer the following questions:
+
+1. To what extent can information, behavioral and monetary interventions reduce energy consumption of households in residential buildings?
+2. What is the relative effectiveness of interventions?
+3. How effective are combinations of different interventions?
+
+Below you can find an overview of the data from studies up to January 2025.
+
+```{r population}
+population <- dfinc %>%
+  distinct(Authors, `document PY`, `document title`, .keep_all = TRUE) %>%
+  summarise(total = sum(total_sample_size, na.rm = TRUE))
+population <- population$total[[1]]
+```
+
+There are `r nrow(dfinc)` effect sizes from `r nrow(unique(dfinc[, c("Authors", "document PY", "document title")]))` studies, covering a population of `r format(population, scientific = FALSE)` in `r nrow(unique(na.omit(dfinc$country)))` countries.
+
+### Histogram of yearly publications of included studies
+```{r hist, results='markup'}
+df_unique <- dfinc %>%
+  distinct(Authors, `document PY`, `document title`)
+
+# count number of documents per year
+docs_per_year <- df_unique %>%
+  count(`document PY`, name = "n")
+
+# plot histogram
+ggplot(docs_per_year, aes(x = `document PY`, y = n)) +
+  geom_col(fill = "darkslategrey") +
+  labs(
+    title = "Number of included documents per year"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Map of included studies
+```{r map, results='markup'}
+world_map <- ne_countries(scale = "medium", returnclass = "sf")
+
+dfinc <- dfinc %>%
+  mutate(country = case_when(
+    country == "USA" ~ "United States of America",
+    country == "UK" ~ "United Kingdom",
+    country == "Korea" ~ "South Korea",
+    TRUE ~ country  
+  ))
+
+countries <- unique(na.omit(dfinc$country))
+
+#world_map$in_sample <- ifelse(world_map$name %in% countries, "yes", "no")
+
+# ggplot(data = world_map) +
+#   geom_sf(aes(fill = in_sample), color = "black", size = 0.5) +  
+#   scale_fill_manual(values = c("yes" = "lightblue", "no" = "white")) +  
+#   theme_minimal() +
+#   labs(title = "Map of included studies",
+#        subtitle = paste("Number of countries:", length(countries))) +
+#   theme(plot.title = element_text(hjust = 0.5),
+#         plot.subtitle = element_text(hjust = 0.5))
+
+df_uniquec <- dfinc %>%
+  distinct(Authors, `document PY`, `document title`,`country`) %>%
+  filter(! is.na(country))
+
+country_counts <- df_uniquec %>%
+  group_by(country) %>%
+  summarise(study_count = n(), .groups = "drop")
+
+world_map_n <- world_map %>%
+  left_join(country_counts, by = c("name" = "country"))
+
+ggplot(data = world_map_n) +
+  geom_sf(aes(fill = study_count), color = "black", size = 0.5) + 
+  scale_fill_gradient(low = "honeydew", high = "darkslategray", na.value = "white") +
+  theme_minimal() +
+  labs(title = "Number of studies per country") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+```{r summary}
+# factor variables
+sumVarsFactor <- c(#"intervention",
+                   "Opt_in_out",
+                   "StatsMethod",
+                   "StudyDesign",
+                   "Randomisation",
+                   "Region",
+                   "Weather",
+                   "cat_criterion1",
+                   "cat_criterion2",
+                   "cat_criterion5",
+                   "cat_criterion6",
+                   "cat_criterion7")
+
+# numeric variables
+sumvarsNum <- c("smd",
+                "var_smd")
+
+dfinc_all[sumVarsFactor] <- lapply(dfinc_all[sumVarsFactor], factor)
+dfinc_all[sumvarsNum] <- lapply(dfinc_all[sumvarsNum], as.numeric)
+
+# for(col in names(select(dfinc_all,all_of(sumVarsFactor)))) {
+#   freq_table <- freq(dfinc_all[[col]], style = "rmarkdown", cumul=FALSE, report.nas = FALSE, totals = FALSE)
+#   print(freq_table)
+# }
+
+# dfinc_all %>%
+#   select(all_of(c(sumVarsFactor,sumvarsNum))) %>% 
+#   dfSummary(graph.col = T, style = "grid", na.col = F, 
+#             valid.col = F, varnumbers = F, class = F, 
+#             plain.ascii = T, view = F) %>%
+#   print(file = paste0("summarystatistics", format(Sys.Date(), "%d%m%Y"), ".html"))
+
+# knitr::include_url(paste0("summarystatistics", format(Sys.Date(), "%d%m%Y"), ".html"), height = "800px")
+```
+
+### Summary statistics: 
+
+<iframe src="summarystatistics13052025.html" width="100%" height="800px" style="border:none;"></iframe>
+
+And an overview of included effect sizes per intervention:
+```{r interventions, results = 'markup'}
+# use this for showing n observations per intervention
+int_count <- table(dfinc_all$intervention)
+int_df <- as.data.frame(int_count)
+int_df_sorted <- int_df[order(-int_df$Freq), ]
+rownames(int_df_sorted) <- NULL 
+
+library(kableExtra)
+kable(int_df_sorted, col.names = c("Intervention", "Count")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","condensed"), font_size = 9,full_width = F) 
+```
+
+```{r meta-analysis, results = 'markup'}
+
+dfinc_all$se = (dfinc_all$var_smd)^(1/2)
+# dfinc_all <- dfinc_all %>%
+#  filter (intervention %in% c("Feedback","Information","SocialComparison","Motivation","MonetaryRewards", "DynamicPricing"))
+
+meta_all <- rma.mv(smd, var_smd, random = ~ as.factor(effectID) | as.factor(documentID),
+                   data = dfinc_all, method = "REML")
+#summary(meta_all)
+
+meta_all_se <- rma.mv(smd, var_smd, mods = ~ se,
+                      random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+#summary(meta_all_se)
+
+meta_all_smd <- rma.mv(smd, var_smd, mods = ~ var_smd,
+                      random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+#summary(meta_all_smd)
+
+# meta_model<-rma.mv(smd, var_smd, mods =  ~ Feedback:Information:SocialComparison:Motivation:MonetaryRewards:DynamicPricing+0,
+#                    random = ~ as.factor(effectID) | as.factor(documentID), data = dfinc_all, method = "REML")
+#summary(meta_model)
+```
+
+Average effect size: `r round(meta_all[['beta']], 2)`
+
+Average effect size adjusted for small study or publication bias (based on variance): `r round(meta_all_smd[['beta']], 2)`
+
+Best performing intervention:
+
+Correction for risk of bias: 
+
+[Study protocol](https://onlinelibrary.wiley.com/doi/10.1002/cl2.1424)
+
+If you know of a study that should be included in this systematic review & meta-analysis, especially from under-represented regions, please reach out to us at [e-mail](mailto:dianada@pik-potsdam.de).
